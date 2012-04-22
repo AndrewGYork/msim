@@ -1,101 +1,83 @@
-import subprocess, sys, os
-import pco, dmd, piezo
+import subprocess, sys, os, time
+import pco, dmd, stage
 
-def snap(file_name='image.raw', save_path=None, preframes=3):
-    """Take a single SIM frame without moving the piezo"""
-
-    """To synchronize the DMD and the camera polling, we need two processes"""
-    cmdString = """
-import dmd, sys, time
-dmd_handle = dmd.open_dmd()
-sequence_id, num_frames = dmd.apply_settings(dmd_handle)
-sys.stdout.write('%i'%(num_frames) + '\\n')
-sys.stdout.flush()
-cmd = raw_input()
-time.sleep(0.15) #Give the camera time to arm
-dmd.display_pattern(dmd_handle, sequence_id)
-dmd.free_device(dmd_handle)
-"""
-    proc = subprocess.Popen( #python vs. pythonw on Windows?
-        [sys.executable, '-c %s'%cmdString],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE)
-    for i in range(8):
-        print proc.stdout.readline(),
-    num_images = int(proc.stdout.readline())
-    print "Num. images:", num_images
-
-    camera_handle = pco.open_camera()
-    pco.apply_settings(camera_handle,
-                       trigger="external trigger/software exposure control")
-    print "Triggering DMD..."
-    proc.stdin.write('Go!\n') #DMD should fire shortly after this
-    pco.record_to_file(camera_handle, num_images=num_images,
-                       file_name=file_name, save_path=save_path)
-    pco.close_camera(camera_handle)
-    print "DMD subprocess postmortem"
-    report = proc.communicate()
-    for i in report:
-        print ' ' + i
+def snap(file_basename='image.raw', save_path=None, preframes=3):
+    return z_t_series(z_positions=[None], file_basename=file_basename,
+          save_path=save_path, preframes=preframes)
     
-def stack(
-    z_positions = [0], file_basename='image.raw', save_path=None, preframes=3):
+def z_t_series(
+    z_positions=[None], time_delays=[None],
+    file_basename='image.raw', save_path=None, preframes=3):
     """Take a sequence of SIM frames while moving the piezo"""
 
-    """To synchronize the DMD and the camera polling, we need two processes"""
-    cmdString = """
-import dmd, sys, time
-dmd_handle = dmd.open_dmd()
-sequence_id, num_frames = dmd.apply_settings(dmd_handle)
-sys.stdout.write('%i'%(num_frames) + '\\n')
-sys.stdout.flush()
-while True:
-    cmd = raw_input()
-    if cmd == 'done':
-        break
-    time.sleep(0.15) #Give the camera time to arm
-    dmd.display_pattern(dmd_handle, sequence_id)
-dmd.free_device(dmd_handle)
-"""
-    proc = subprocess.Popen( #python vs. pythonw on Windows?
-        [sys.executable, '-c %s'%cmdString],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE)
-    for i in range(8):
-        print proc.stdout.readline(),
-    num_images = int(proc.stdout.readline())
-    print "Num. images:", num_images
+    micromirrors = dmd.Micromirror_Subprocess(delay=0.020)
+    print "Preframes to be discarded:", preframes
 
-    piezo_handle = piezo.open_piezo()
-    camera_handle = pco.open_camera()
-    pco.apply_settings(camera_handle,
-                       trigger="external trigger/software exposure control")
+    if z_positions[0] is not None:
+        piezo = stage.Z()
+    camera = pco.Edge()
+    camera.apply_settings(trigger="external trigger/software exposure control")
+    camera.arm()
     basename, ext = os.path.splitext(file_basename)
-    for z in z_positions:
-        z = float(z)
-        piezo.move(piezo_handle, z)
-        file_name = (
-            basename +
-            ('_z=%+05.2f'%(z*0.1)
-             ).replace('.', 'p').replace('-', 'n').replace('+', '') +
-            ext)
-        print file_name
-        print "Triggering DMD..."
-        proc.stdin.write('Go!\n') #DMD should fire shortly after this
-        pco.record_to_file(camera_handle, num_images=num_images,
-                           file_name=file_name, save_path=save_path)
-    piezo.close_piezo(piezo_handle)
-    proc.stdin.write('done\n')
-    pco.close_camera(camera_handle)
-    print "DMD subprocess postmortem"
-    report = proc.communicate()
-    for i in report:
-        print i
+    filenames, z_points, t_points = [], [], []
+    for j, delay in enumerate(time_delays):
+        if delay is not None:
+            print "\nPausing for %0.3f seconds..."%(delay)
+            time.sleep(delay)
+            print "Done pausing."
+            t_index = '_t%04i'%(j)
+        else:
+            t_index = ''
+        for i, z in enumerate(z_positions):
+            if z is not None:
+                piezo.move(float(z))
+                z_index = '_z%04i'%(i)
+            else:
+                z_index = ''
+            file_name = basename + t_index + z_index + ext
+            filenames.append(file_name)
+            z_points.append(z)
+            t_points.append(time.clock())
+            print file_name
+            print "Triggering micromirrors..."
+            micromirrors.display_pattern() #DMD should fire shortly after this
+            try:
+                camera.record_to_file(
+                    num_images=micromirrors.num_images, preframes=preframes,
+                    file_name=file_name, save_path=save_path)
+            except:
+                print "\n Recording failed \n"
+                micromirrors.close()
+                raise
+            print "DMD subprocess report:"
+            micromirrors.readout()
+    camera.close()
+    micromirrors.close()
+    if z_positions[0] is not None:
+        piezo.close()
+    if z_positions[0] is not None or time_delays[0] is not None:
+        index = open(basename + '_index.txt', 'wb')
+        for i, fn in enumerate(filenames):
+            z = z_points[i]
+            t = t_points[i]
+            index.write(fn +
+                        ': z= %+0.3f microns'%(z*0.1) +
+                        ', t= %0.4f seconds\r\n'%(t))
+        index.close()
+    return filenames, t_points, z_points
 
 if __name__ == '__main__':
 ##    snap()
-    stack(z_positions=range(-5, 40), file_basename='tubules.raw')
+
+    filenames, t_points, z_points = z_t_series(
+        time_delays=[None],
+        z_positions=range(-15, 50, 1),
+        file_basename='u2os_488.raw')
+    
+##    import numpy, pylab
+##    fig = pylab.figure()
+##    pylab.plot(numpy.diff(t_points), '.-')
+##    fig.show()
+##    fig.canvas.draw()
 
     

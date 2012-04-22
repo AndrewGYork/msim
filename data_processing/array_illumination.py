@@ -1,9 +1,7 @@
-
 import os, sys, cPickle, pprint, numpy, pylab
 from itertools import product
-from scipy.ndimage import gaussian_filter, interpolation
-from scipy.spatial import Delaunay
-from scipy.signal import hann
+from scipy.ndimage import gaussian_filter, median_filter, interpolation
+from scipy.signal import hann, gaussian
 
 def get_lattice_vectors(
     filename='Sample.raw',
@@ -14,6 +12,7 @@ def get_lattice_vectors(
     yPix=512,
     zPix=201,
     bg_zPix=200,
+    preframes=0,
     extent=15,
     num_spikes=300,
     tolerance=3.,
@@ -31,14 +30,15 @@ def get_lattice_vectors(
     """Given a swept-field confocal image stack, finds
     the basis vectors of the illumination lattice pattern."""
 
-    image_data = load_image_data(filename, xPix=xPix, yPix=yPix, zPix=zPix)
+    image_data = load_image_data(
+        filename, xPix=xPix, yPix=yPix, zPix=zPix, preframes=preframes)
 
     if lake is not None:
         print " Detecting lake illumination lattice parameters..."
         (lake_lattice_vectors, lake_shift_vector, lake_offset_vector
          ) = get_lattice_vectors(
              filename=lake, lake=None, bg=None,
-             xPix=xPix, yPix=yPix, zPix=zPix,
+             xPix=xPix, yPix=yPix, zPix=zPix, preframes=preframes,
              extent=extent,
              num_spikes=num_spikes,
              tolerance=tolerance,
@@ -65,7 +65,7 @@ def get_lattice_vectors(
         shift_vector = lake_shift_vector
         """The offset vector is now cheap to compute"""
         offset_vector = get_offset_vector(
-            which_image=image_data[0, :, :],
+            image=image_data[0, :, :],
             direct_lattice_vectors=direct_lattice_vectors,
             verbose=verbose, display=display,
             show_interpolation=show_interpolation)
@@ -122,7 +122,7 @@ def get_lattice_vectors(
         """Use the Fourier lattice and the image data to measure
         shift and offset"""
         offset_vector = get_offset_vector(
-            which_image=image_data[0, :, :],
+            image=image_data[0, :, :],
             direct_lattice_vectors=direct_lattice_vectors,
             verbose=verbose, display=display,
             show_interpolation=show_interpolation)
@@ -153,7 +153,7 @@ def get_lattice_vectors(
     else:
         (intensities_vs_galvo_position, background_frame
          ) = spot_intensity_vs_galvo_position(
-             lake, xPix, yPix, zPix,
+             lake, xPix, yPix, zPix, preframes,
              lake_lattice_vectors, lake_shift_vector, lake_offset_vector,
              bg, bg_zPix, window_size=calibration_window_size,
              verbose=verbose, show_steps=show_calibration_steps,
@@ -161,24 +161,222 @@ def get_lattice_vectors(
         return (direct_lattice_vectors, corrected_shift_vector, offset_vector,
                 intensities_vs_galvo_position, background_frame)
 
+def enderlein_image(
+    data_filename,
+    xPix, yPix, zPix, steps, preframes,
+    lattice_vectors, offset_vector, shift_vector,
+    intensities_vs_galvo_position, background_frame,
+    new_grid_x, new_grid_y,
+    window_footprint=10,
+    aperture_size=3,
+    make_widefield_image=True,
+    make_confocal_image=False, #Broken, for now
+    verbose=True,
+    show_steps=False, #For debugging
+    show_slices=False, #For debugging
+    intermediate_data=False, #Memory hog, for stupid reasons, leave 'False'
+    normalize=False #Of uncertain merit, leave 'False' probably
+    ):
+    basename = os.path.splitext(data_filename)[0]
+    enderlein_image_name = basename + '_enderlein_image.raw'
+
+    if os.path.exists(enderlein_image_name):
+        print "\nEnderlein image already calculated."
+        print "Loading", os.path.split(enderlein_image_name)[1]
+        enderlein_image = numpy.fromfile(
+            enderlein_image_name, dtype=float
+            ).reshape(new_grid_x.shape[0], new_grid_y.shape[0])
+    else:
+        print "\nCalculating Enderlein image"
+        print
+        if show_steps or show_slices: fig = pylab.figure()
+        enderlein_image = numpy.zeros(
+            (new_grid_x.shape[0], new_grid_y.shape[0]), dtype=numpy.float)
+        enderlein_normalization = numpy.zeros_like(enderlein_image)
+        this_frames_enderlein_image = numpy.zeros_like(enderlein_image)
+        this_frames_normalization = numpy.zeros_like(enderlein_image)
+        if intermediate_data:
+            cumulative_sum = numpy.memmap(
+                basename + '_cumsum.raw', dtype=float, mode='w+',
+                shape=(steps,) + enderlein_image.shape)
+            processed_frames = numpy.memmap(
+                basename + '_frames.raw', dtype=float, mode='w+',
+                shape=(steps,) + enderlein_image.shape)
+        if make_widefield_image:
+            widefield_image = numpy.zeros_like(enderlein_image)
+            widefield_coordinates = numpy.meshgrid(new_grid_x, new_grid_y)
+            widefield_coordinates = (
+                widefield_coordinates[0].reshape(
+                    new_grid_x.shape[0] * new_grid_y.shape[0]),
+                widefield_coordinates[1].reshape(
+                    new_grid_x.shape[0] * new_grid_y.shape[0]))
+        if make_confocal_image:
+            confocal_image = numpy.zeros_like(enderlein_image)
+        enderlein_normalization.fill(1e-12)
+        image_data = load_image_data(
+            data_filename, xPix, yPix, zPix, preframes)
+        aperture = gaussian(2*window_footprint+1, std=aperture_size
+                            ).reshape(2*window_footprint+1, 1)
+        aperture = aperture * aperture.T
+        grid_step_x = new_grid_x[1] - new_grid_x[0]
+        grid_step_y = new_grid_y[1] - new_grid_y[0]
+        subgrid_footprint = numpy.floor(
+            (-1 + window_footprint * 0.5 / grid_step_x,
+             -1 + window_footprint * 0.5 / grid_step_y))
+        subgrid = ( #Add 2*(r_0 - r_M) to this to get s_desired
+            window_footprint + 2 * grid_step_x * numpy.arange(
+                -subgrid_footprint[0], subgrid_footprint[0] + 1),
+            window_footprint + 2 * grid_step_y * numpy.arange(
+                -subgrid_footprint[1], subgrid_footprint[1] + 1))
+        subgrid_points = ((2*subgrid_footprint[0] + 1) *
+                          (2*subgrid_footprint[1] + 1))
+        for z in range(steps):
+            this_frames_enderlein_image.fill(0.)
+            this_frames_normalization.fill(1e-12)
+            if verbose:
+                sys.stdout.write("\rProcessing raw data image %i"%(z))
+                sys.stdout.flush()
+            if make_widefield_image:
+                widefield_image += interpolation.map_coordinates(
+                    image_data[z, :, :], widefield_coordinates
+                    ).reshape(new_grid_y.shape[0], new_grid_x.shape[0]).T
+            lattice_points, i_list, j_list = (
+                generate_lattice(
+                    image_shape=(xPix, yPix),
+                    lattice_vectors=lattice_vectors,
+                    center_pix=offset_vector + get_shift(
+                        shift_vector, z),
+                    edge_buffer=window_footprint+1,
+                    return_i_j=True))
+            for m, lp in enumerate(lattice_points):
+                i, j = int(i_list[m]), int(j_list[m])
+                """Take an image centered on each illumination point"""
+                spot_image = get_centered_subimage(
+                    center_point=lp, window_size=window_footprint,
+                    image=image_data[z, :, :], background=background_frame)
+                """Aperture the image with a synthetic pinhole"""
+                intensity_normalization = 1.0 / (
+                    intensities_vs_galvo_position.get(
+                        (i, j), {}).get(z, numpy.inf))
+                if (intensity_normalization == 0 or
+                    spot_image.shape != (2*window_footprint+1,
+                                         2*window_footprint+1)):
+                    continue #Skip to the next spot
+                apertured_image = (aperture *
+                                   spot_image *
+                                   intensity_normalization)
+                nearest_grid_index = numpy.round(
+                        (lp - (new_grid_x[0], new_grid_y[0])) /
+                        (grid_step_x, grid_step_y))
+                nearest_grid_point = (
+                    (new_grid_x[0], new_grid_y[0]) +
+                    (grid_step_x, grid_step_y) * nearest_grid_index)
+                new_coordinates = numpy.meshgrid(
+                    subgrid[0] + 2 * (nearest_grid_point[0] - lp[0]),
+                    subgrid[1] + 2 * (nearest_grid_point[1] - lp[1]))
+                resampled_image = interpolation.map_coordinates(
+                    apertured_image,
+                    (new_coordinates[0].reshape(subgrid_points),
+                     new_coordinates[1].reshape(subgrid_points))
+                    ).reshape(2*subgrid_footprint[1]+1,
+                              2*subgrid_footprint[0]+1).T
+                """Add the recentered image back to the scan grid"""
+                if intensity_normalization > 0:
+                    this_frames_enderlein_image[
+                        nearest_grid_index[0]-subgrid_footprint[0]:
+                        nearest_grid_index[0]+subgrid_footprint[0]+1,
+                        nearest_grid_index[1]-subgrid_footprint[1]:
+                        nearest_grid_index[1]+subgrid_footprint[1]+1,
+                        ] += resampled_image
+                    this_frames_normalization[
+                        nearest_grid_index[0]-subgrid_footprint[0]:
+                        nearest_grid_index[0]+subgrid_footprint[0]+1,
+                        nearest_grid_index[1]-subgrid_footprint[1]:
+                        nearest_grid_index[1]+subgrid_footprint[1]+1,
+                        ] += 1
+                    if make_confocal_image: #FIXME!!!!!!!
+                        confocal_image[
+                            nearest_grid_index[0]-window_footprint:
+                            nearest_grid_index[0]+window_footprint+1,
+                            nearest_grid_index[1]-window_footprint:
+                            nearest_grid_index[1]+window_footprint+1
+                            ] += interpolation.shift(
+                                apertured_image, shift=(lp-nearest_grid_point))
+                if show_steps:
+                    pylab.clf()
+                    pylab.suptitle(
+                        "Spot %i, %i in frame %i\nCentered at %0.2f, %0.2f\n"%(
+                            i, j, z, lp[0], lp[1]) + (
+                                "Nearest grid point: %i, %i"%(
+                                    nearest_grid_point[0],
+                                    nearest_grid_point[1])))
+                    pylab.subplot(1, 3, 1)
+                    pylab.imshow(
+                        spot_image, interpolation='nearest', cmap=pylab.cm.gray)
+                    pylab.subplot(1, 3, 2)
+                    pylab.imshow(apertured_image, interpolation='nearest',
+                                 cmap=pylab.cm.gray)
+                    pylab.subplot(1, 3, 3)
+                    pylab.imshow(resampled_image, interpolation='nearest',
+                                 cmap=pylab.cm.gray)
+                    fig.show()
+                    fig.canvas.draw()
+                    response = raw_input('\nHit enter to continue, q to quit:')
+                    if response == 'q' or response == 'e' or response == 'x':
+                        print "Done showing steps..."
+                        show_steps = False
+            enderlein_image += this_frames_enderlein_image
+            enderlein_normalization += this_frames_normalization
+            if not normalize:
+                enderlein_normalization.fill(1)
+                this_frames_normalization.fill(1)
+            if intermediate_data:
+                cumulative_sum[z, :, :] = (
+                    enderlein_image * 1. / enderlein_normalization)
+                cumulative_sum.flush()
+                processed_frames[
+                    z, :, :] = this_frames_enderlein_image * 1. / (
+                        this_frames_normalization)
+                processed_frames.flush()
+            if show_slices:
+                pylab.clf()
+                pylab.imshow(enderlein_image * 1.0 / enderlein_normalization,
+                             cmap=pylab.cm.gray, interpolation='nearest')
+                fig.show()
+                fig.canvas.draw()
+                response=raw_input('Hit enter to continue...')
+
+        enderlein_image = enderlein_image * 1.0 / enderlein_normalization
+        enderlein_image.tofile(enderlein_image_name)
+        if make_widefield_image:
+            widefield_image.tofile(basename + '_widefield.raw')
+        if make_confocal_image:
+            confocal_image.tofile(basename + '_confocal.raw')
+    fig = pylab.figure()
+    pylab.imshow(enderlein_image,
+                 interpolation='nearest', cmap=pylab.cm.gray)
+    pylab.colorbar()
+    fig.show()
+    return None
+
 ##def load_image_data(filename, xPix=512, yPix=512, zPix=201):
 ##    """Load the 16-bit raw data from the Visitech Infinity"""
 ##    return numpy.memmap(
 ##        filename, dtype=numpy.uint16, mode='r'
 ##        ).reshape(zPix, xPix, yPix) #FIRST dimension is image number
 
-def load_image_data(filename, xPix=512, yPix=512, zPix=201):
+def load_image_data(filename, xPix=512, yPix=512, zPix=201, preframes=0):
     """Load the 16-bit raw data from the Visitech Infinity"""
-    bytes_per_pixel = 2
-    return numpy.memmap(
+    return numpy.memmap(#FIRST dimension is image number
         filename, dtype=numpy.uint16, mode='r'
-        ).reshape(zPix, xPix, yPix) #FIRST dimension is image number
+        ).reshape(zPix+preframes, xPix, yPix)[preframes:, :, :]
 
 def load_image_slice(filename, xPix, yPix, which_slice=0):
     """Load a frame of the 16-bit raw data from the Visitech Infinity"""
     bytes_per_pixel = 2
     data_file = open(filename, 'rb')
     data_file.seek(which_slice * xPix*yPix*bytes_per_pixel)
+    data_file.close()
     return numpy.fromfile(
         data_file, dtype=numpy.uint16, count=xPix*yPix
         ).reshape(xPix, yPix)
@@ -512,18 +710,21 @@ def combinations_with_replacement(iterable, r):
             yield tuple(pool[i] for i in indices)
 
 def get_offset_vector(
-    which_image, direct_lattice_vectors,
+    image, direct_lattice_vectors, prefilter='median',
     verbose=True, display=True, show_interpolation=True):
+    if prefilter == 'median':
+        image = median_filter(image, size=3)
     if verbose: print "\nCalculating offset vector..."
-    ws = 2 + 2*int(max(
+    ws = 2 + int(max(
         [abs(v).max() for v in direct_lattice_vectors]))
     if verbose: print "Window size:", ws
-    window = numpy.zeros([ws]*2).astype(numpy.int64)
+    window = numpy.zeros([2*ws + 1]*2, dtype=numpy.float)
     lattice_points = generate_lattice(
-        which_image.shape, direct_lattice_vectors, edge_buffer=2+ws)
+        image.shape, direct_lattice_vectors, edge_buffer=2+ws)
     for lp in lattice_points:
-        x, y = numpy.round(lp).astype(int)
-        window += which_image[x:x+ws, y:y+ws] #Switch to get_centered_subimage?
+        window += get_centered_subimage(
+            center_point=lp, window_size=ws, image=image)
+
     if display:
         fig = pylab.figure()
         pylab.imshow(window, interpolation='nearest', cmap=pylab.cm.gray)
@@ -545,7 +746,7 @@ def get_offset_vector(
     correction = simple_max_finder(
         window[max_pix[0]-1:max_pix[0]+2, max_pix[1]-1:max_pix[1]+2],
         show_plots=show_interpolation)
-    offset_vector = max_pix + correction + numpy.array(which_image.shape)//2
+    offset_vector = max_pix + correction + numpy.array(image.shape)//2 - ws
     if verbose: print "Offset vector:", offset_vector
     return offset_vector
 
@@ -690,7 +891,7 @@ def get_precise_shift_vector(
     image_data, scan_type, verbose):
     """Use the offset vector to correct the shift vector"""
     final_offset_vector = get_offset_vector(
-        which_image=image_data[-1, :, :],
+        image=image_data[-1, :, :],
         direct_lattice_vectors=direct_lattice_vectors,
         verbose=False, display=False, show_interpolation=False)
     final_lattice = generate_lattice(
@@ -811,7 +1012,7 @@ def combine_lattices(
     return spots
 
 def spot_intensity_vs_galvo_position(
-    lake_filename, xPix, yPix, zPix,
+    lake_filename, xPix, yPix, zPix, preframes,
     direct_lattice_vectors, shift_vector, offset_vector,
     background_filename, background_zPix,
     window_size=5, verbose=False, show_steps=False, display=False):
@@ -837,7 +1038,7 @@ def spot_intensity_vs_galvo_position(
             print "\nCalculating illumination spot intensities..."
             print "Constructing background image..."
         background_image_data = load_image_data(
-            background_filename, xPix, yPix, background_zPix)
+            background_filename, xPix, yPix, background_zPix, preframes)
         bg = numpy.zeros((xPix, yPix), dtype=float)
         for z in range(background_image_data.shape[0]):
             bg += background_image_data[z, :, :]
@@ -845,7 +1046,8 @@ def spot_intensity_vs_galvo_position(
         del background_image_data
         if verbose: print "Background image complete."
 
-        lake_image_data = load_image_data(lake_filename, xPix, yPix, zPix)
+        lake_image_data = load_image_data(
+            lake_filename, xPix, yPix, zPix, preframes)
         intensities_vs_galvo_position = {}
         """A dict of dicts. Element [i, j][z] gives the intensity of the
         i'th, j'th spot in the lattice, in frame z"""
@@ -1004,6 +1206,7 @@ def get_centered_subimage(
 ##    return (w1*z1 + w2*z2 + w3*z3) * -1.0 / denom
 
 ##"""Leftover code from a different interpolation approach"""
+##from scipy.spatial import Delaunay
 ##def find_interpolation_neighbors(
 ##    new_grid_x, new_grid_y,
 ##    direct_lattice_vectors, shift_vector, offset_vector,

@@ -118,7 +118,7 @@ def z_t_series(
             raise UserWarning('Pick a shorter exposure time')
 
     micromirror_parameters = {
-        'delay': 0.02,
+        'delay': 0.04,
         'illuminate_time': exposure['it'],
         'picture_time': exposure['pt'],
         }
@@ -133,8 +133,9 @@ def z_t_series(
         raise UserWarning("'pattern' must be 'sim' or 'widefield'")
     micromirrors = dmd.Micromirror_Subprocess(**micromirror_parameters)
 
-    laser_shutters = shutters.Laser_Shutters(colors=[c[0] for c in colors])
-    shutter_delay = 0.05 #Extra seconds we wait for the shutter to open (zero?)
+    laser_shutters = shutters.Laser_Shutters(
+        colors=[c[0] for c in colors],
+        pause_after_open=0.75) ##Seconds we wait after shutter opens (vibration)
 
     filter_wheel = wheel.Filter_Wheel(initial_position=colors[0][1])
     
@@ -154,7 +155,6 @@ def z_t_series(
         if len(colors) == 1:
             filter_wheel.move(colors[0][1])
             laser_shutters.open(colors[0][0])
-            time.sleep(shutter_delay)
         if len(time_delays) > 1:
             time_delays = [0] + time_delays
         for j, delay in enumerate(time_delays):
@@ -178,7 +178,6 @@ def z_t_series(
                     if len(colors) > 1 or delay > 0:
                         filter_wheel.move(c[1])
                         laser_shutters.open(c[0])
-                        time.sleep(shutter_delay)
                     file_name = (basename + '_c' + c[0] + '_' + c[1] +
                                  t_index + z_index + ext)
                     print file_name
@@ -205,7 +204,6 @@ def z_t_series(
                             camera.arm()
                             filter_wheel.move(c[1])
                             laser_shutters.open(c[0])
-                            time.sleep(shutter_delay)
                         else: #It worked!
                             if len(colors) > 1:
                                 laser_shutters.shut(c[0])
@@ -270,24 +268,24 @@ if __name__ == '__main__':
 ##        colors=[('488', 'f3')]
 ##        )
 
+    filenames, t_points, z_points = z_t_series(
+        time_delays=[20],
+##        z_positions=[0, 0, 0, 0],
+        z_positions=range(-10, 26, 2),
+        repetition_period_microseconds='4500',
+##        illumination_microseconds=100, #important for widefield
+        pattern='sim',
+        colors=[('488', 'f1'), ('561', 'f3')]
+        )
+
 ##    filenames, t_points, z_points = z_t_series(
 ##        time_delays=[None],
-####        z_positions=[0],
-##        z_positions=range(-100, 100, 1),
+####        z_positions=[0, 0, 0, 0],
+##        z_positions=range(20, 30, 1),
 ##        repetition_period_microseconds='4500',
-####        illumination_microseconds=100, #important for widefield
+####        illumination_microseconds=1200, #important for widefield
 ##        pattern='sim',
-##        colors=[('488', 'f1')]
+##        colors=[('488', 'f2')]
 ##        )
-
-    filenames, t_points, z_points = z_t_series(
-        time_delays=[0]*5,
-##        z_positions=[0],
-        z_positions=range(-20, 40, 2), 
-        repetition_period_microseconds='4500',
-##        illumination_microseconds=1200, #important for widefield
-        pattern='sim',
-        colors=[('488', 'f1')]
-        )
 
     

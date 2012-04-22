@@ -83,7 +83,7 @@ def apply_settings(camera_handle, trigger='auto trigger'):
     print "Storage mode:", mode_names[wStorageMode.value]
 
     print "Setting recorder submode..."
-    wRecSubmode = ctypes.c_uint16(0)
+    wRecSubmode = ctypes.c_uint16(1)
     PCO_api.PCO_SetRecorderSubmode(camera_handle, wRecSubmode)
     PCO_api.PCO_GetRecorderSubmode(camera_handle, ctypes.byref(wRecSubmode))
     mode_names = {0: "sequence", 1: "ring buffer"}
@@ -193,6 +193,8 @@ def record_to_file(camera_handle, num_images, num_buffers=2,
                     print "After", num_polls, "polls, buffer",
                     print sBufNr[which_buf].value, "is ready."
                 break
+            if num_polls > 1e6:
+                raise UserWarning("After a million polls, no buffer.")
 
         response = libc.fwrite(
             wBuf[which_buf], bytes_per_pixel, pixels_per_image, file_pointer)

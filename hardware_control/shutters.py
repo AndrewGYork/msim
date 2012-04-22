@@ -6,16 +6,16 @@ class Laser_Shutters:
         self.states = {}
         if colors == 'all':
             colors = ['488', '561']
-        for c, p in (('488', 4), ('561', 5)):
+        for c, p in (('488', 4), ('561', 5)): #Have to pick the right ports
             if c in colors:
                 try:
                     self.ports[c] = serial.Serial(p, 9600, timeout=1)
                 except:
-                    raise UserWarning("Is the " + c + " shutter on?")
+                    raise UserWarning(
+                        "Can't open port for the " + c + " shutter.")
         for c in self.ports.keys():
             self._robust_shut(c)
             self.states[c] = False
-         #Have to pick the right ports
 
     def toggle(self, color='488', verbose=True): #Fast but not robust
         if verbose: print "Toggling shutter:", color
@@ -33,8 +33,16 @@ class Laser_Shutters:
         p.flushInput()
         p.flushOutput()
         p.write("ens?\r")
+        num_sleeps = 0
         while p.inWaiting() < 9:
             time.sleep(0.001)
+            num_sleeps += 1
+            if num_sleeps > 1000:
+                import sys
+                sys.stdout.write(
+                    color + " shutter is not responding. (Ctrl-C to abort)\n")
+                sys.stdout.flush()
+                num_sleeps = 0
         response = p.read(p.inWaiting())
         if response == 'ens?\r0\r> ':
             return False
@@ -80,7 +88,6 @@ class Laser_Shutters:
             p.close()        
 
 if __name__ == '__main__':
-    import time
     try:
         s = Laser_Shutters()
         s.open(color='488')

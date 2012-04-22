@@ -1,5 +1,5 @@
 import os, time, re, string
-import pco, dmd, stage, shutters
+import pco, dmd, stage, shutters, wheel
 import numpy
 
 def get_save_file():
@@ -75,7 +75,7 @@ def max_proj_stack(
     return None
 
 def snap(
-    colors=['488'],
+    colors=[('488', 'f3')],
     file_basename='image.raw', save_path=None, preframes=3,
     pattern='sim', repetition_period_microseconds='4500',
     illumination_microseconds=None):
@@ -83,7 +83,7 @@ def snap(
     return z_t_series(**input_variables)
     
 def z_t_series(
-    colors=['488'], z_positions=[None], time_delays=[None],
+    colors=[('488', 'f3')], z_positions=[None], time_delays=[None],
     file_basename=None, save_path=None, preframes=3,
     pattern='sim', repetition_period_microseconds='4500',
     illumination_microseconds=None):
@@ -127,8 +127,10 @@ def z_t_series(
         }
     micromirrors = dmd.Micromirror_Subprocess(**micromirror_parameters)
 
-    laser_shutters = shutters.Laser_Shutters(colors=colors)
+    laser_shutters = shutters.Laser_Shutters(colors=[c[0] for c in colors])
     shutter_delay = 0.05 #Extra seconds we wait for the shutter to open (zero?)
+
+    filter_wheel = wheel.Filter_Wheel(initial_position=colors[0][1])
     
     if z_positions[0] is not None:
         piezo = stage.Z()
@@ -144,7 +146,8 @@ def z_t_series(
     filenames, c_points, z_points, t_points = [], [], [], []
     try: #Don't worry, we re-raise exceptions in here!
         if len(colors) == 1:
-            laser_shutters.open(colors[0])
+            filter_wheel.move(colors[0][1])
+            laser_shutters.open(colors[0][0])
             time.sleep(shutter_delay)
         if len(time_delays) > 1:
             time_delays = [0] + time_delays
@@ -153,7 +156,7 @@ def z_t_series(
                 print "\nPausing for %0.3f seconds..."%(delay)
                 if delay > 0:
                     for c in colors:
-                        laser_shutters.shut(c)
+                        laser_shutters.shut(c[0])
                     time.sleep(delay)
                     print "Done pausing."
                 t_index = '_t%04i'%(j)
@@ -167,9 +170,11 @@ def z_t_series(
                     z_index = ''
                 for c in colors:
                     if len(colors) > 1 or delay > 0:
-                        laser_shutters.open(c)
+                        filter_wheel.move(c[1])
+                        laser_shutters.open(c[0])
                         time.sleep(shutter_delay)
-                    file_name = basename + '_c' + c + t_index + z_index + ext
+                    file_name = (basename + '_c' + c[0] + '_' + c[1] +
+                                 t_index + z_index + ext)
                     print file_name
                     for tries in range(4):
                         print "Triggering micromirrors..."
@@ -179,7 +184,7 @@ def z_t_series(
                                 num_images=micromirrors.num_images, preframes=preframes,
                                 file_name=file_name, save_path=save_path)
                         except Exception as exc:
-                            laser_shutters.shut(c)
+                            laser_shutters.shut(c[0])
                             print "\n Recording failed"
                             print "Retrying...\n"
                             print "Micromirrors postmortem:"
@@ -192,11 +197,12 @@ def z_t_series(
                             camera = pco.Edge()
                             camera.apply_settings(**camera_parameters)
                             camera.arm()
-                            laser_shutters.open(c)
+                            filter_wheel.move(c[1])
+                            laser_shutters.open(c[0])
                             time.sleep(shutter_delay)
                         else: #It worked!
                             if len(colors) > 1:
-                                laser_shutters.shut(c)
+                                laser_shutters.shut(c[0])
                             break
                     else: #We failed a bunch of times
                         raise exc
@@ -212,6 +218,7 @@ def z_t_series(
         raise
     finally:
         laser_shutters.close()
+        filter_wheel.close()
         camera.close()
         micromirrors.close()
         if z_positions[0] is not None:
@@ -225,12 +232,13 @@ def z_t_series(
                 t = t_points[i]
                 c = c_points[i]
                 index.write(fn +
-                            ': c= %s'%(c) +
+                            ': c= %s'%(c[0]) +
+                            ', f= %s'%(c[1]) +
                             ', z= %+0.3f microns'%(z*0.1) +
                             ', t= %0.4f seconds\r\n'%(t))
             index.close()
         data_filename_pattern = (
-            basename + '_c???' +
+            basename + '_c???_f?' +
             re.sub('[%s]'%string.digits, '?', t_index) +
             re.sub('[%s]'%string.digits, '?', z_index) +
             ext) #Hard-coded ???? lengths...
@@ -253,17 +261,17 @@ if __name__ == '__main__':
 ##        repetition_period_microseconds='4500',
 ####        illumination_microseconds=None, #Important for widefield
 ##        pattern='sim',
-##        colors=['488']
+##        colors=[('488', 'f3')]
 ##        )
 
     filenames, t_points, z_points = z_t_series(
-        time_delays=[0, 1],
+        time_delays=[None],
 ##        z_positions=[0],
-        z_positions=range(-10,10,6),
+        z_positions=range(-10,10,5),
         repetition_period_microseconds='4500',
 ##        illumination_microseconds=100, #important for widefield
         pattern='sim',
-        colors=['488', '561']
+        colors=[('488', 'f1'), ('488', 'f2')]
         )
 
     

@@ -149,7 +149,12 @@ micromirrors.close()
             stderr=subprocess.PIPE)
         for i in range(8):
             print self.subprocess.stdout.readline(),
-        self.num_images = int(self.subprocess.stdout.readline())
+        try:
+            self.num_images = int(self.subprocess.stdout.readline())
+        except ValueError:
+            print "\n\nSomething's wrong... is the DMD on and plugged in?\n\n"
+            print "\n\nI'm looking at you, Temprine!\n\n"
+            raise
         print "Num. images:", self.num_images
         return None
     

@@ -869,7 +869,7 @@ def spot_intensity_vs_galvo_position(
                 spot_image = get_centered_subimage(
                     center_point=lp, window_size=window_size,
                     image=im, background=bg)
-                intensity_history[z] = spot_image.sum()
+                intensity_history[z] = float(spot_image.sum()) #Funny thing...
                 if show_steps:
                     pylab.clf()
                     pylab.imshow(

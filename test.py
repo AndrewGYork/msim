@@ -12,13 +12,13 @@ scan_dimensions = None
 
 """Menagerie of data sources. Uncomment one of these lines:"""
 data_filename, lake_filename, xPix, yPix, zPix, steps, extent, scan_type, scan_dimensions = (
-    '02_tubules_60x_1p45.raw',
-    '01_lake_60x_1p45.raw',
-    640, 640, 340, 340, 17, 'dmd', (20, 17))
+    '03_tubules_09_06.raw',
+    '01_lake_09_06.raw',
+    640, 640, 168, 168, 30, 'dmd', (14, 12))
 
-background_filename, background_zPix = 'background.raw', 340
+background_filename, background_zPix = 'background.raw', 168
 
-data_dir = '2011_10_06'
+data_dir = '2011_10_14'
 
 ##Don't edit below here
 data_filename = os.path.join(os.getcwd(), data_dir, data_filename)
@@ -64,19 +64,20 @@ print offset_vector
 ##    xPix=500, yPix=500, step_size=1, num_steps=steps)
 
 """Define a new Cartesian grid for Enderlein's trick:"""
-new_grid_x = numpy.linspace(0, xPix-1, xPix)
-new_grid_y = numpy.linspace(0, yPix-1, yPix)
+new_grid_x = numpy.linspace(0, xPix-1, 2*xPix)
+new_grid_y = numpy.linspace(0, yPix-1, 2*yPix)
 
 """Interpolate the neighboring illumination points to calculate a
 higher resolution image"""
-window_footprint = 14 #For now, make this an even number
-aperture_size = 7
+window_footprint = 10 #For now, make this an even number
+aperture_size = 3
 smoothing_sigma = 0
 show_steps = False
 show_slices = False
 verbose = True
-intermediate_data = True
-make_confocal_image = True
+intermediate_data = False
+make_widefield_image = True
+make_confocal_image = False
 
 basename = os.path.splitext(data_filename)[0]
 enderlein_image_name = basename + '_enderlein_image.raw'
@@ -94,7 +95,7 @@ else:
     enderlein_image = numpy.zeros(
         (new_grid_x.shape[0], new_grid_y.shape[0]), dtype=numpy.float)
     enderlein_normalization = numpy.zeros_like(enderlein_image)
-    this_frames_image = numpy.zeros_like(enderlein_image)
+    this_frames_enderlein_image = numpy.zeros_like(enderlein_image)
     this_frames_normalization = numpy.zeros_like(enderlein_image)
     if intermediate_data:
         cumulative_sum = numpy.memmap(
@@ -103,10 +104,19 @@ else:
         processed_frames = numpy.memmap(
             basename + '_frames.raw', dtype=float, mode='w+',
             shape=(steps,) + enderlein_image.shape)
+    if make_widefield_image:
+        widefield_image = numpy.zeros_like(enderlein_image)
+        widefield_coordinates = numpy.meshgrid(new_grid_x, new_grid_y)
+        widefield_coordinates = (
+            widefield_coordinates[0].reshape(
+                new_grid_x.shape[0] * new_grid_y.shape[0]),
+            widefield_coordinates[1].reshape(
+                new_grid_x.shape[0] * new_grid_y.shape[0]))
     if make_confocal_image:
         confocal_image = numpy.zeros_like(enderlein_image)
-    enderlein_normalization += 1e-12
-    image_data = array_illumination.load_image_data(data_filename, xPix, yPix, zPix)
+    enderlein_normalization.fill(1e-12)
+    image_data = array_illumination.load_image_data(
+        data_filename, xPix, yPix, zPix)
     aperture = gaussian(2*window_footprint+1, std=aperture_size
                         ).reshape(2*window_footprint+1, 1)
     aperture = aperture * aperture.T
@@ -122,11 +132,15 @@ else:
             -subgrid_footprint[1], subgrid_footprint[1] + 1))
     subgrid_points = (2*subgrid_footprint[0] + 1) * (2*subgrid_footprint[1] + 1)
     for z in range(steps):
-        this_frames_image.fill(0.)
+        this_frames_enderlein_image.fill(0.)
         this_frames_normalization.fill(1e-12)
         if verbose:
             sys.stdout.write("\rProcessing raw data image %i"%(z))
             sys.stdout.flush()
+        if make_widefield_image:
+            widefield_image += interpolation.map_coordinates(
+                image_data[z, :, :], widefield_coordinates
+                ).reshape(new_grid_y.shape[0], new_grid_x.shape[0]).T
         lattice_points, i_list, j_list = array_illumination.generate_lattice(
             image_shape=(xPix, yPix),
             lattice_vectors=lattice_vectors,
@@ -148,12 +162,15 @@ else:
                 ):
                 continue #Skip to the next spot
             apertured_image = aperture * spot_image * intensity_normalization
-            """Smooth and resample the apertured image"""
-            gaussian_filter(apertured_image, sigma=smoothing_sigma,
-                            output=apertured_image)
-            nearest_grid_point = numpy.round(
-                (lp - (new_grid_x[0], new_grid_y[0])) /
-                (grid_step_x, grid_step_y))
+##            """Smooth and resample the apertured image"""
+##            gaussian_filter(apertured_image, sigma=smoothing_sigma,
+##                            output=apertured_image)
+            nearest_grid_index = numpy.round(
+                    (lp - (new_grid_x[0], new_grid_y[0])) /
+                    (grid_step_x, grid_step_y))
+            nearest_grid_point = (
+                (new_grid_x[0], new_grid_y[0]) +
+                (grid_step_x, grid_step_y) * nearest_grid_index)
             new_coordinates = numpy.meshgrid(
                 subgrid[0] + 2 * (nearest_grid_point[0] - lp[0]),
                 subgrid[1] + 2 * (nearest_grid_point[1] - lp[1]))
@@ -161,27 +178,27 @@ else:
                 apertured_image,
                 (new_coordinates[0].reshape(subgrid_points),
                  new_coordinates[1].reshape(subgrid_points))
-                ).reshape(2*subgrid_footprint[0]+1, 2*subgrid_footprint[1]+1).T
+                ).reshape(2*subgrid_footprint[1]+1, 2*subgrid_footprint[0]+1).T
             """Add the recentered image back to the scan grid"""
             if intensity_normalization > 0:
-                this_frames_image[
-                    nearest_grid_point[0]-subgrid_footprint[0]:
-                    nearest_grid_point[0]+subgrid_footprint[0]+1,
-                    nearest_grid_point[1]-subgrid_footprint[1]:
-                    nearest_grid_point[1]+subgrid_footprint[1]+1,
+                this_frames_enderlein_image[
+                    nearest_grid_index[0]-subgrid_footprint[0]:
+                    nearest_grid_index[0]+subgrid_footprint[0]+1,
+                    nearest_grid_index[1]-subgrid_footprint[1]:
+                    nearest_grid_index[1]+subgrid_footprint[1]+1,
                     ] += resampled_image
                 this_frames_normalization[
-                    nearest_grid_point[0]-subgrid_footprint[0]:
-                    nearest_grid_point[0]+subgrid_footprint[0]+1,
-                    nearest_grid_point[1]-subgrid_footprint[1]:
-                    nearest_grid_point[1]+subgrid_footprint[1]+1,
+                    nearest_grid_index[0]-subgrid_footprint[0]:
+                    nearest_grid_index[0]+subgrid_footprint[0]+1,
+                    nearest_grid_index[1]-subgrid_footprint[1]:
+                    nearest_grid_index[1]+subgrid_footprint[1]+1,
                     ] += 1
-                if make_confocal_image:
+                if make_confocal_image: #FIXME!!!!!!!
                     confocal_image[
-                        nearest_grid_point[0]-window_footprint:
-                        nearest_grid_point[0]+window_footprint+1,
-                        nearest_grid_point[1]-window_footprint:
-                        nearest_grid_point[1]+window_footprint+1
+                        nearest_grid_index[0]-window_footprint:
+                        nearest_grid_index[0]+window_footprint+1,
+                        nearest_grid_index[1]-window_footprint:
+                        nearest_grid_index[1]+window_footprint+1
                         ] += interpolation.shift(
                             apertured_image, shift=(lp-nearest_grid_point))
             if show_steps:
@@ -206,7 +223,7 @@ else:
                 if response == 'q' or response == 'e' or response == 'x':
                     print "Done showing steps..."
                     show_steps = False
-        enderlein_image += this_frames_image
+        enderlein_image += this_frames_enderlein_image
         enderlein_normalization += this_frames_normalization
         ###Temporary hack:
         enderlein_normalization.fill(1)
@@ -214,8 +231,11 @@ else:
         if intermediate_data:
             cumulative_sum[z, :, :] = (
                 enderlein_image * 1. / enderlein_normalization)
+            cumulative_sum.flush()
             processed_frames[
-                z, :, :] = this_frames_image * 1. / this_frames_normalization
+                z, :, :] = this_frames_enderlein_image * 1. / (
+                    this_frames_normalization)
+            processed_frames.flush()
         if show_slices:
             pylab.clf()
             pylab.imshow(enderlein_image * 1.0 / enderlein_normalization,
@@ -226,6 +246,8 @@ else:
 
     enderlein_image = enderlein_image * 1.0 / enderlein_normalization
     enderlein_image.tofile(enderlein_image_name)
+    if make_widefield_image:
+        widefield_image.tofile(basename + '_widefield.raw')
     if make_confocal_image:
         confocal_image.tofile(basename + '_confocal.raw')
 fig = pylab.figure()

@@ -342,13 +342,16 @@ def enderlein_image_subprocess(
     intensities_vs_galvo_position = cPickle.load(
         open(lake_intensities_name, 'rb'))
     lake_directory_name = os.path.dirname(lake_intensities_name)
-    background_frame = numpy.fromfile(background_name).reshape(xPix, yPix)
+    background_frame = numpy.fromfile(
+        background_name).reshape(xPix, yPix).astype(float)
     try:
         hot_pixels = numpy.fromfile(
             os.path.join(lake_directory_name, 'hot_pixels.txt'), sep=', ')
-    except IOError:
+    except:
         hot_pixels = None
-        raise
+        skip_hot_pix = raw_input("Hot pixel list not found. Continue? y/[n]:")
+        if skip_hot_pix != 'y':
+            raise
     else:
         hot_pixels = hot_pixels.reshape(2, len(hot_pixels)/2)
 
@@ -400,7 +403,7 @@ def enderlein_image_subprocess(
     for z in range(start_frame, end_frame+1):
         im = load_image_slice(
             filename=data_filename, xPix=xPix, yPix=yPix,
-            preframes=preframes, which_slice=z)
+            preframes=preframes, which_slice=z).astype(float)
         if hot_pixels is not None:
             im = remove_hot_pixels(im, hot_pixels)
         this_frames_enderlein_image.fill(0.)
@@ -890,7 +893,7 @@ def get_offset_vector(
         image.shape, direct_lattice_vectors, edge_buffer=2+ws)
     for lp in lattice_points:
         window += get_centered_subimage(
-            center_point=lp, window_size=ws, image=image)
+            center_point=lp, window_size=ws, image=image.astype(float))
 
     if display:
         fig = pylab.figure()
@@ -1196,8 +1199,11 @@ def spot_intensity_vs_galvo_position(
         hot_pixels = numpy.fromfile(
             os.path.join(lake_directory_name, 'hot_pixels.txt'), sep=', ')
     except IOError:
-        hot_pixels = None
-        raise
+        skip_hot_pix = raw_input("Hot pixel list not found. Continue? y/[n]:")
+        if skip_hot_pix != 'y':
+            raise
+        else:
+            hot_pixels = None
     else:
         hot_pixels = hot_pixels.reshape(2, len(hot_pixels)/2)
     
@@ -1231,7 +1237,7 @@ def spot_intensity_vs_galvo_position(
         if show_steps: fig = pylab.figure()
         print "Computing flat-field calibration..."
         for z in range(lake_image_data.shape[0]):
-            im = numpy.array(lake_image_data[z, :, :])
+            im = numpy.array(lake_image_data[z, :, :], dtype=float)
             if hot_pixels is not None:
                 im = remove_hot_pixels(im, hot_pixels)
             sys.stdout.write("\rCalibration image %i"%(z))
@@ -1338,12 +1344,61 @@ def get_centered_subimage(
     x, y = numpy.round(center_point).astype(int)
     xSl = slice(max(x-window_size-1, 0), x+window_size+2)
     ySl = slice(max(y-window_size-1, 0), y+window_size+2)
-    subimage = image[xSl, ySl].astype(float)
+    subimage = image[xSl, ySl]
     if background != 'none':
-        subimage -= background[xSl, ySl].astype(float)
+        subimage -= background[xSl, ySl]
     interpolation.shift(
         subimage, shift=(x, y)-center_point, output=subimage)
     return subimage[1:-1, 1:-1]
+
+def join_enderlein_images(
+    data_filenames_list,
+    new_grid_xrange, new_grid_yrange,
+    join_widefield_images=True
+    ):
+    if len(data_filenames_list) < 2:
+        print "Less than two files to join. Skipping..."
+        return None
+    print "Joining enderlein and widefield images into stack..."
+    enderlein_stack = numpy.zeros(
+        (len(data_filenames_list), new_grid_xrange[2], new_grid_yrange[2]),
+        dtype=numpy.float)
+    if join_widefield_images:
+        widefield_stack = numpy.zeros(
+            (len(data_filenames_list), new_grid_xrange[2], new_grid_yrange[2]),
+            dtype=numpy.float)
+    for i, d in enumerate(data_filenames_list):
+        basename = os.path.splitext(d)[0]
+        enderlein_image_name = basename + '_enderlein_image.raw'
+        widefield_image_name = basename + '_widefield.raw'
+        enderlein_stack[i, :, :] = numpy.fromfile(
+            enderlein_image_name, dtype=numpy.float).reshape(
+            new_grid_xrange[2], new_grid_yrange[2])
+        if join_widefield_images:
+            widefield_stack[i, :, :] = numpy.fromfile(
+                widefield_image_name, dtype=numpy.float).reshape(
+                new_grid_xrange[2], new_grid_yrange[2])
+    stack_basename = os.path.commonprefix(data_filenames_list).rstrip(
+        '0123456789')
+    print "Stack basename:", stack_basename
+    enderlein_stack.tofile(stack_basename + '_enderlein_stack.raw')
+    widefield_stack.tofile(stack_basename + '_widefield_stack.raw')
+    e_notes = open(stack_basename + '_enderlein_stack.txt', 'wb')
+    w_notes = open(stack_basename + '_widefield_stack.txt', 'wb')
+    e_notes.write("Left/right: %i pixels\r\n"%(enderlein_stack.shape[2]))
+    e_notes.write("Up/down: %i pixels\r\n"%(enderlein_stack.shape[1]))
+    e_notes.write("Number of images: %i\r\n"%(enderlein_stack.shape[0]))
+    e_notes.write("Data type: 64-bit real\r\n")
+    e_notes.write("Byte order: Intel (little-endian))\r\n")
+    e_notes.close()
+    w_notes.write("Left/right: %i pixels\r\n"%(widefield_stack.shape[2]))
+    w_notes.write("Up/down: %i pixels\r\n"%(widefield_stack.shape[1]))
+    w_notes.write("Number of images: %i\r\n"%(widefield_stack.shape[0]))
+    w_notes.write("Data type: 64-bit real\r\n")
+    w_notes.write("Byte order: Intel (little-endian))\r\n")
+    w_notes.close()
+    print "Done joining."
+    return None
 
 #####
 #####   Leftover code from when I was doing triangulation myself.            

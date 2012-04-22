@@ -202,7 +202,7 @@ def spike_filter(fft_abs):
     f *= 1.0 / f.std()
     return f
 
-def find_spikes(fft_abs, filtered_fft_abs, extent=15, num_spikes=150,
+def find_spikes(fft_abs, filtered_fft_abs, extent=15, num_spikes=300,
                 display=True, animate=False):
     """Finds spikes in the sum of the 2D ffts of an image stack"""
     center_pix = numpy.array(fft_abs.shape)//2
@@ -335,7 +335,8 @@ def get_precise_basis(coords, basis_vectors, fft_abs, tolerance, verbose=False):
             return precise_basis_vectors            
         num_vectors += 1
 
-def get_basis_vectors(fft_abs, coords, extent=15, tolerance=3., verbose=False):
+def get_basis_vectors(
+    fft_abs, coords, extent=15, tolerance=3., num_harmonics=3, verbose=False):
     for i in range(len(coords)): #Where to start looking.
         basis_vectors = []
         precise_basis_vectors = []
@@ -361,7 +362,7 @@ def get_basis_vectors(fft_abs, coords, extent=15, tolerance=3., verbose=False):
                 if verbose: print "\nTesting:", coord
                 num_vectors, points_found = test_basis(
                     coords, [coord], tolerance=tolerance, verbose=verbose)
-                if num_vectors > 3:
+                if num_vectors > num_harmonics:
                     #We found enough harmonics. Keep it, for now.
                     basis_vectors.append(coord)
                     center_pix = numpy.array(fft_abs.shape)//2
@@ -378,7 +379,7 @@ def get_basis_vectors(fft_abs, coords, extent=15, tolerance=3., verbose=False):
                         num_vectors, points_found = test_basis(
                             coords, basis_vectors, tolerance=tolerance,
                             verbose=verbose)
-                        if num_vectors > 3:
+                        if num_vectors > num_harmonics:
                             #The combination predicts the lattice
                             if len(basis_vectors) == 3:
                                 #We're done; we have three consistent vectors.
@@ -398,6 +399,9 @@ def get_basis_vectors(fft_abs, coords, extent=15, tolerance=3., verbose=False):
                                     print "Possible triangle combinations:"
                                     for p in possibilities: print " ", p
                                 precise_basis_vectors = possibilities[0]
+                                if precise_basis_vectors[-1][0] < 0:
+                                    for p in range(3):
+                                        precise_basis_vectors[p] *= -1
                                 return precise_basis_vectors
                         else:
                             #Blame the new guy, for now.
@@ -629,7 +633,7 @@ def get_lattice_vectors(
     yPix=512,
     zPix=201,
     extent=15,
-    num_spikes=150,
+    num_spikes=300,
     tolerance=3.,
     num_harmonics=3,
     outlier_phase=1.,
@@ -653,7 +657,8 @@ def get_lattice_vectors(
     """Use these candidate spikes to determine the Fourier-space lattice"""
     if verbose: print "Finding Fourier-space lattice vectors..."
     basis_vectors = get_basis_vectors(
-        fft_abs, coords, extent=extent, tolerance=tolerance, verbose=verbose)
+        fft_abs, coords, extent=extent, tolerance=tolerance,
+        num_harmonics=num_harmonics, verbose=verbose)
     if verbose:
         print "Fourier-space lattice vectors:"
         for v in basis_vectors:
@@ -888,9 +893,18 @@ def spot_intensity_vs_galvo_position(
         (fourier_lattice_vectors, direct_lattice_vectors,
          shift_vector, offset_vector) = get_lattice_vectors(
              filename=lake_filename, xPix=xPix, yPix=yPix, zPix=zPix,
-             extent=extent)
+             extent=extent, display=display, show_lattice=display)
 
-        if verbose: print "Constructing background image..."
+        if verbose:
+            print "Lattice vectors:"
+            for v in direct_lattice_vectors:
+                print v
+            print "Shift vector:"
+            print shift_vector
+            print "Initial position:"
+            print offset_vector
+            print
+            print "Constructing background image..."
         background_image_data = load_image_data(
             background_filename, xPix, yPix, background_zPix)
         bg = numpy.zeros((xPix, yPix), dtype=float)
@@ -925,9 +939,6 @@ def spot_intensity_vs_galvo_position(
                     center_point=lp, window_size=window_size,
                     image=im, background=bg)
                 intensity_history[z] = spot_image.sum()
-##                if (i, j) == (-1, -15):
-##                    fig = pylab.gcf()
-##                    show_steps = True
                 if show_steps:
                     pylab.clf()
                     pylab.imshow(
@@ -939,6 +950,7 @@ def spot_intensity_vs_galvo_position(
                     fig.canvas.draw()
                     response = raw_input()
                     if response == 'q' or response == 'e' or response == 'x':
+                        print "Done showing steps..."
                         show_steps = False
         """Normalize the intensity values"""
         num_entries = 0
@@ -1015,64 +1027,87 @@ def display_neighboring_frames(
                 if i < 0: i = 0
                 if j > new_grid.shape[2]: j = new_grid.shape[2] - 1
                 if j < 0: j = 0
-            
-        p = new_grid[:, i, j]
-        n = frames_with_neighboring_illumination[:, i, j]
-        n_pos = neighbor_absolute_positions[:, :, i, j]
-        print "Grid point", p, "has neighbors in frames", n
+
+        get_scan_point_neighbors(
+            new_grid[:, i, j],
+            frames_with_neighboring_illumination[:, i, j],
+            neighbor_absolute_positions[:, :, i, j],
+            image_data, background_image,
+            lattice_vectors, offset_vector, shift_vector,
+            intensities_vs_galvo_position,
+            footprint=5, display=True)
+    return None
+
+def get_scan_point_neighbors(
+    position, neighbors, neighbor_positions,
+    image_data, background_image,
+    lattice_vectors, offset_vector, shift_vector,
+    intensities_vs_galvo_position=None,
+    footprint=5, display=False):
+
+    x, y = numpy.round(position)
+    if display:
+        print "Grid point", position, "has neighbors in frames", neighbors
         print "with positions:"
-        for n_p in n_pos:
+        for n_p in neighbor_positions:
             print n_p
         pylab.clf()
         pylab.suptitle("Illumination near grid point at %0.2f, %0.2f"%(
-            p[0], p[1]))
-        x, y = numpy.round(p)
+            position[0], position[1]))
         print "x, y:", x, y
-        footprint = 5
-        colorImage = numpy.zeros((2*footprint+1, 2*footprint+1, 3)) + 1e-12
-        for c, f in enumerate(n):
-            lattice_indices = numpy.linalg.solve(
-                numpy.vstack(lattice_vectors[:2]).T,
-                n_pos[:, c] - offset_vector - f*shift_vector)
-            print "Lattice indices:", lattice_indices
-##            print  intensities_vs_galvo_position.get((-1, -13), {}).get(129, numpy.inf)
-##            print (int(round(lattice_indices[0])), int(round(lattice_indices[1])))
-##            print f
+
+    threeNeighbors = numpy.zeros((3, 2*footprint+1, 2*footprint+1)) + 1e-12
+    for c, f in enumerate(neighbors):
+        lattice_indices = numpy.linalg.solve(
+            numpy.vstack(lattice_vectors[:2]).T,
+            neighbor_positions[:, c] - offset_vector - f*shift_vector)
+        if intensities_vs_galvo_position == None:
+            calibration_weight = 1
+        else:
             calibration_weight = intensities_vs_galvo_position.get(
-                (int(round(lattice_indices[0])), int(round(lattice_indices[1]))),
+                (int(round(lattice_indices[0])),
+                 int(round(lattice_indices[1]))),
                 {}).get(f, numpy.inf)
+        showMe = get_centered_subimage(
+            center_point=position, #neighbor_positions[:, c],
+            window_size=footprint,
+            image=image_data[f, :, :], background=background_image)
+        if showMe.shape == threeNeighbors.shape[1:] and calibration_weight > 0:
+            threeNeighbors[c, :, :] = showMe * 1.0 / calibration_weight
+        if display:
+            print "Lattice indices:", lattice_indices
             print "Calibration weight:",
-            print "%0.2f"%(calibration_weight)
-            showMe = get_centered_subimage(
-                center_point=n_pos[:, c], window_size=footprint,
-                image=image_data[f, :, :], background=background_image)
+            print "%0.3f"%(calibration_weight)
             print "Frame", "%03i"%(f), "has average value:",
-            print "%0.2f"%(showMe.mean()), "above background"
-            print "Normalized value:", "%0.2f"%(
+            print "%0.3f"%(showMe.mean()), "above background"
+            print "Normalized value:", "%0.3f"%(
                 showMe.mean() * 1.0 / calibration_weight)
-            if showMe.shape == colorImage.shape[:2] and calibration_weight > 0:
-                colorImage[:, :, c] = showMe * 1.0 / calibration_weight
-        if colorImage.max() > colorImage.min():
-            colorImage -= colorImage.min()
-            colorImage *= 1.0 / colorImage.max()
+    if display:
+        fig = pylab.gcf()
+        fig.clf()
+        showMe = numpy.array(threeNeighbors).transpose(1, 2, 0)
+        if showMe.max() > showMe.min():
+            showMe -= showMe.min()
+            showMe *= 1.0 / showMe.max()
         pylab.subplot(1, 2, 1)
-        pylab.title("Frames %i, %i, %i"%(n[0], n[1], n[2]))
-        pylab.imshow(colorImage, interpolation='nearest')
-        if showMe.shape == (2*footprint+1, 2*footprint+1):
-            central_dot = numpy.zeros(showMe.shape + (4,))
-            central_dot[footprint, footprint, 0::3] = 1
-            pylab.imshow(central_dot, interpolation='nearest')
+        pylab.title("Frames %i, %i, %i"%(
+            neighbors[0], neighbors[1], neighbors[2]))
+        pylab.imshow(showMe, interpolation='nearest')
+        central_dot = numpy.zeros(threeNeighbors.shape[1:] + (4,))
+        central_dot[footprint, footprint, 0::3] = 1
+        pylab.imshow(central_dot, interpolation='nearest')
         pylab.subplot(1, 2, 2)
-        pylab.plot(list(n_pos[1, :]) + [n_pos[1, 0]],
-                   list(n_pos[0, :]) + [n_pos[0, 0]], 'b.-')
-        pylab.plot(p[1], p[0], 'rx', markersize=20)
+        pylab.plot(list(neighbor_positions[1, :]) + [neighbor_positions[1, 0]],
+                   list(neighbor_positions[0, :]) + [neighbor_positions[0, 0]],
+                   'b.-')
+        pylab.plot(position[1], position[0], 'rx', markersize=20)
         pylab.axis('equal')
         pylab.grid()
         ax = pylab.gca()
         ax.set_ylim(ax.get_ylim()[::-1])
         fig.show()
         fig.canvas.draw()
-    return None
+    return threeNeighbors
 
 ##def xy_to_lattice_index(
 ##    x, y, frame_number,

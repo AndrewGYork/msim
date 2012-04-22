@@ -3,6 +3,9 @@ import find_lattice
 
 pylab.close('all')
 
+"""Default values, might be overwritten below:"""
+num_harmonics = 3
+
 """Menagerie of data sources. Uncomment one of these lines:"""
 ##data_filename, xPix, yPix, zPix = 'QDots.raw', 512, 512, 201
 ##data_filename, xPix, yPix, zPix = 'Beads.raw', 512, 512, 201
@@ -17,16 +20,21 @@ pylab.close('all')
 ##data_filename, xPix, yPix, zPix, steps = 'Lake_2.raw', 1024, 1344, 200, 186
 ##data_filename, xPix, yPix, zPix, steps = 'Lake_3.raw', 1024, 1344, 200, 187
 ##data_filename, xPix, yPix, zPix, steps = 'Lake_0p89uW.raw', 1024, 1344, 200, 188
-data_filename, xPix, yPix, zPix, steps, extent = 'Lake_1p40uW.raw', 1024, 1344, 200, 188, 9
+##data_filename, xPix, yPix, zPix, steps, extent = 'Lake_1p40uW.raw', 1024, 1344, 200, 188, 9
 ##data_filename, xPix, yPix, zPix, steps, extent = 'Lake_1p96uW.raw', 1024, 1344, 200, 188, 9
 ##data_filename, xPix, yPix, zPix, steps = 'utubules_z0p00.raw', 1024, 1344, 200, 188
-##data_filename, xPix, yPix, zPix, steps, extent = 'fake_lattice.raw', 260, 260, 200, 185, 9
+##data_filename, xPix, yPix, zPix, steps, extent = 'fake_lake.raw', 512, 512, 200, 185, 8
+##data_filename, xPix, yPix, zPix, steps, extent = 'fake_beads.raw', 512, 512, 200, 185, 8
+##data_filename, xPix, yPix, zPix, steps, extent = 'fake_tubules.raw', 512, 512, 200, 185, 8
+data_filename, xPix, yPix, zPix, steps, extent = 'fake_tubules_sigma_1p00.raw', 512, 512, 200, 185, 8
+##data_filename, xPix, yPix, zPix, steps, extent = 'Tubules_sapun_1.raw', 1024, 1344, 200, 188, 9
+##data_filename, xPix, yPix, zPix, steps, extent = 'Tubules_sapun_2.raw', 1024, 1344, 200, 188, 9
 
 
-##lake_filename = 'fake_lattice.raw'
-##background_filename, background_zPix = 'fake_background.raw', 200
-lake_filename = 'Lake_1p96uW.raw'
-background_filename, background_zPix = 'Lake_0p00uW.raw', 200
+lake_filename = 'fake_lake.raw'
+background_filename, background_zPix = 'fake_lake_background.raw', 200
+##lake_filename = 'Lake_sapun_2.raw'
+##background_filename, background_zPix = 'Lake_0p00uW.raw', 200
 
 data_dir = 'data'
 data_filename = os.path.join(os.getcwd(), data_dir, data_filename)
@@ -42,15 +50,15 @@ print "\nDetecting illumination lattice parameters..."
  shift_vector, offset_vector) = find_lattice.get_lattice_vectors(
      filename=data_filename, xPix=xPix, yPix=yPix, zPix=zPix,
      extent=extent, #Important to get this right. '20' for 1024/1344
-     num_spikes=200,
+     num_spikes=300,
      tolerance=3.5,
-     num_harmonics=3,
+     num_harmonics=num_harmonics,
      outlier_phase=1.,
      verbose=False, #Useful for debugging
      display=False, #Useful for debugging
      animate=False, #Useful to see if 'extent' is right
      show_interpolation=False, #Fairly low-level debugging
-     show_lattice=False) #Very useful for checking validity
+     show_lattice=True) #Very useful for checking validity
 print "Lattice vectors:"
 for v in direct_lattice_vectors:
     print v
@@ -63,7 +71,7 @@ print offset_vector
  background_frame) = find_lattice.spot_intensity_vs_galvo_position(
      lake_filename, xPix, yPix, zPix, extent,
      background_filename, background_zPix,
-     window_size=10, verbose=False, show_steps=False, display=False)
+     window_size=10, verbose=True, show_steps=False, display=True)
 
 ##"""Show a representative region of the illumination scan pattern"""
 ##spots = find_lattice.show_illuminated_points(
@@ -127,31 +135,37 @@ else:
             neighbors = frames_with_neighboring_illumination[:, i, j]
             neighbor_positions = neighbor_absolute_positions[:, :, i, j]
 
-            x, y = numpy.round(position)
-            if (x < window_footprint + 3) or (y < window_footprint + 3):
-                continue #Ignore edge points
-            if (x >= (image_data.shape[1] - window_footprint - 3) or
-                y >= (image_data.shape[2] - window_footprint - 3)):
-                continue #Ignore edge points
-
-            neighbor_images = []
-            for wf, which_frame in enumerate(neighbors):
-                x_n, y_n = neighbor_positions[:, wf]
-                lattice_indices = tuple(numpy.round(numpy.linalg.solve(
-                    numpy.vstack(direct_lattice_vectors[:2]).T,
-                    neighbor_positions[:, wf] -
-                    offset_vector - which_frame*shift_vector)).astype(int))
-                calibration_factor = intensities_vs_galvo_position.get(
-                    lattice_indices, {}).get(which_frame, numpy.inf)
-                neighbor_images.append((1.0 / calibration_factor)*image_data[
-                    which_frame,
-                    round(x_n) - window_footprint:round(x_n) + window_footprint + 1,
-                    round(y_n) - window_footprint:round(y_n) + window_footprint + 1
-                    ].astype(float))
-                if neighbor_images[-1].shape != (2*window_footprint+1,
-                                                 2*window_footprint+1):
-                    neighbor_images[-1] = numpy.zeros((2*window_footprint+1,
-                                                       2*window_footprint+1))
+            neighbor_images = find_lattice.get_scan_point_neighbors(
+                position, neighbors, neighbor_positions,
+                image_data, background_frame,
+                direct_lattice_vectors, offset_vector, shift_vector,
+                intensities_vs_galvo_position,
+                footprint=5)
+##            x, y = numpy.round(position)
+##            if (x < window_footprint + 3) or (y < window_footprint + 3):
+##                continue #Ignore edge points
+##            if (x >= (image_data.shape[1] - window_footprint - 3) or
+##                y >= (image_data.shape[2] - window_footprint - 3)):
+##                continue #Ignore edge points
+##
+##            neighbor_images = []
+##            for wf, which_frame in enumerate(neighbors):
+##                x_n, y_n = neighbor_positions[:, wf]
+##                lattice_indices = tuple(numpy.round(numpy.linalg.solve(
+##                    numpy.vstack(direct_lattice_vectors[:2]).T,
+##                    neighbor_positions[:, wf] -
+##                    offset_vector - which_frame*shift_vector)).astype(int))
+##                calibration_factor = intensities_vs_galvo_position.get(
+##                    lattice_indices, {}).get(which_frame, numpy.inf)
+##                neighbor_images.append((1.0 / calibration_factor)*image_data[
+##                    which_frame,
+##                    round(x_n) - window_footprint:round(x_n) + window_footprint + 1,
+##                    round(y_n) - window_footprint:round(y_n) + window_footprint + 1
+##                    ].astype(float))
+##                if neighbor_images[-1].shape != (2*window_footprint+1,
+##                                                 2*window_footprint+1):
+##                    neighbor_images[-1] = numpy.zeros((2*window_footprint+1,
+##                                                       2*window_footprint+1))
             enderlein_format[i, j, :, :
                              ] = find_lattice.three_point_weighted_average(
                                  position=position,

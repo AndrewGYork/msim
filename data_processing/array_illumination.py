@@ -28,7 +28,8 @@ def get_lattice_vectors(
     animate=False,
     show_interpolation=False,
     show_calibration_steps=False,
-    show_lattice=False):
+    show_lattice=False,
+    record_parameters=True):
 
     if len(filename_list) < 1:
         raise UserWarning('Filename list is empty.')
@@ -71,33 +72,37 @@ def get_lattice_vectors(
         direct_lattice_vectors = lake_lattice_vectors
         shift_vector = lake_shift_vector
         """The offset vector is now cheap to compute"""
-        first_image_average = numpy.zeros((xPix, yPix), dtype=numpy.float)
-        print "Computing average of first image..."
+        first_image_proj = numpy.zeros((xPix, yPix), dtype=numpy.float)
+        print "Computing projection of first image..."
         for i, f in enumerate(filename_list):
-            first_image_average += load_image_slice(
+            im = load_image_slice(
                 filename=f, xPix=xPix, yPix=yPix, preframes=preframes,
                 which_slice=0)
-            sys.stdout.write('\rAdding image %i'%(i))
+            first_image_proj = numpy.where(
+                im > first_image_proj, im, first_image_proj)
+            sys.stdout.write('\rProjecting image %i'%(i))
             sys.stdout.flush()
         print
         offset_vector = get_offset_vector(
-            image=first_image_average,
+            image=first_image_proj,
             direct_lattice_vectors=direct_lattice_vectors,
             verbose=verbose, display=display,
             show_interpolation=show_interpolation)
         """And the shift vector is cheap to correct"""
-        last_image_average = numpy.zeros((xPix, yPix), dtype=numpy.float)
-        print "Computing average of first image..."
+        last_image_proj = numpy.zeros((xPix, yPix), dtype=numpy.float)
+        print "Computing projection of first image..."
         for f in filename_list:
-            last_image_average += load_image_slice(
+            im = load_image_slice(
                 filename=f, xPix=xPix, yPix=yPix, preframes=preframes,
                 which_slice=zPix-1)
-            sys.stdout.write('\rAdding image %i'%(i))
+            last_image_proj = numpy.where(
+                im > last_image_proj, im, last_image_proj)
+            sys.stdout.write('\rProjecting image %i'%(i))
             sys.stdout.flush()
         print
-        corrected_shift_vector = get_precise_shift_vector(
+        corrected_shift_vector, final_offset_vector = get_precise_shift_vector(
             direct_lattice_vectors, shift_vector, offset_vector,
-            last_image_average, zPix, scan_type, verbose)
+            last_image_proj, zPix, scan_type, verbose)
     else:
         if len(filename_list) > 1:
             raise UserWarning(
@@ -165,7 +170,7 @@ def get_lattice_vectors(
             verbose=verbose, display=display,
             scan_type=scan_type, scan_dimensions=scan_dimensions)
         
-        corrected_shift_vector = get_precise_shift_vector(
+        corrected_shift_vector, final_offset_vector = get_precise_shift_vector(
             direct_lattice_vectors, shift_vector, offset_vector,
             image_data[-1, :, :], zPix, scan_type, verbose)
 
@@ -200,6 +205,22 @@ def get_lattice_vectors(
         pylab.close('all')
         import gc
         gc.collect() #Actually required, for once!
+
+    if record_parameters:
+        params = open(os.path.join(
+            os.path.dirname(filename_list[0]), 'parameters.txt'), 'wb')
+        params.write("Direct lattice vectors:" +
+                     repr(direct_lattice_vectors) + "\r\n\r\n")
+        params.write("Corrected shift vector:" +
+                     repr(corrected_shift_vector) + "\r\n\r\n")
+        params.write("Offset vector:" +
+                     repr(offset_vector) + "\r\n\r\n")
+        params.write("Final offset vector:" +
+                     repr(final_offset_vector) + "\r\n\r\n")
+        if lake is not None:
+            params.write("Lake filename:" + lake + "\r\n\r\n")
+        params.close()
+        
 
     if lake is None or bg is None:
         return (direct_lattice_vectors, corrected_shift_vector, offset_vector)
@@ -1109,7 +1130,7 @@ def get_precise_shift_vector(
         print ' ',
         pprint.pprint(corrected_shift_vector)
         print
-    return corrected_shift_vector
+    return corrected_shift_vector, final_offset_vector
 
 def get_shift(shift_vector, frame_number):
     if isinstance(shift_vector, dict):

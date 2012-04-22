@@ -122,55 +122,62 @@ class Micromirror_Subprocess:
         import subprocess, sys
 
         cmdString = """
-import dmd, sys, time
-micromirrors = dmd.ALP()
-sys.stdout.flush()
-while True:
-    cmd = raw_input()
-    if cmd == 'done':
-        break
-    elif cmd == 'apply_settings':
-        illuminate_time = int(raw_input())
-        picture_time = int(raw_input))
-        illumination_filename = raw_input()
-        num_frames = micromirrors.apply_settings(
-            illuminate_time=illuminate_time, picture_time=picture_time,
-            illumination_filename=illumination_filename)
-        sys.stdout.write(repr(int(num_frames)) + '\\n')
-    else:
-        time.sleep(%s) #Give the camera time to arm
-        micromirrors.display_pattern()
+try:
+    import dmd, sys, time
+    micromirrors = dmd.ALP()
     sys.stdout.flush()
-micromirrors.close()
+    while True:
+        cmd = raw_input()
+        if cmd == 'done':
+            break
+        elif cmd == 'apply_settings':
+            illuminate_time = int(raw_input())
+            picture_time = int(raw_input())
+            illumination_filename = raw_input()
+            num_frames = micromirrors.apply_settings(
+                illuminate_time=illuminate_time, picture_time=picture_time,
+                illumination_filename=illumination_filename)
+            sys.stdout.write(repr(int(num_frames)) + '\\n')
+        else:
+            time.sleep(%s) #Give the camera time to arm
+            micromirrors.display_pattern()
+        sys.stdout.flush()
+    micromirrors.close()
+except:
+    import traceback
+    traceback.print_exc()
 """%(repr(delay))
-        print cmdString
-        raw_input()
         self.subprocess = subprocess.Popen( #python vs. pythonw on Windows?
             [sys.executable, '-c %s'%cmdString],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
-        for i in range(8): #FIXME!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        for i in range(2):
             print self.subprocess.stdout.readline(),
         self.apply_settings(illuminate_time, picture_time,
                             illumination_filename)
-        print "Num. images:", self.num_images
         return None
 
-    def apply_settings(illuminate_time, picture_time=4500,
+    def apply_settings(self, illuminate_time, picture_time=4500,
                        illumination_filename='illumination_pattern.raw'):
         self.subprocess.stdin.write('apply_settings\n')
         self.subprocess.stdin.write(repr(illuminate_time) + '\n')
         self.subprocess.stdin.write(repr(picture_time) + '\n')
         self.subprocess.stdin.write(illumination_filename + '\n')
-        for i in range(8): #FIXME!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        for i in range(6):
             print self.subprocess.stdout.readline(),
+        response = self.subprocess.stdout.readline()
         try:
-            self.num_images = int(self.subprocess.stdout.readline())
+            self.num_images = int(response)
         except ValueError:
-            print "\n\nSomething's wrong... is the DMD on and plugged in?\n\n"
+            print response
+            print "Subprocess error message:",
+            for i in self.subprocess.communicate():
+                print ' ', i.replace('\n', '\n ')
+            print "\n\nSomething's wrong... is the DMD on and plugged in?"
             print "\n\nI'm looking at you, Temprine!\n\n"
             raise
+        print "Num. images:", self.num_images
         return None
     
     def display_pattern(self):
@@ -194,9 +201,13 @@ micromirrors.close()
 if __name__ == '__main__':
     print "Creating a micromirror subprocess..."
     micromirrors = Micromirror_Subprocess(
-        illuminate_time=6700, picture_time=20000)
-    micromirrors.display_pattern()
-    micromirrors.readout()
+        illuminate_time=2200, picture_time=4500)
+    for i in range(3):
+        micromirrors.apply_settings(
+            illuminate_time=2200, picture_time=4500,
+            illumination_filename='illumination_pattern.raw')
+        micromirrors.display_pattern()
+        micromirrors.readout()
     micromirrors.close()
 
 ##    print "Creating a widefield micromirror subprocess..."

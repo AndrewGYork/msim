@@ -42,8 +42,6 @@ def max_proj_stack(
     elif data_folder is None: #Still need to know this, but we can guess.
         data_folder = os.path.dirname(data_filenames_list[0])
 
-    print data_filenames_list
-
     if len(data_filenames_list) > 0:
         max_projections = numpy.zeros(
             ((len(data_filenames_list),) + data_dimensions), dtype=numpy.uint16)
@@ -121,10 +119,15 @@ def z_t_series(
 
     micromirror_parameters = {
         'delay': 0.02,
-        'pattern': pattern,
         'illuminate_time': exposure['it'],
         'picture_time': exposure['pt'],
         }
+    if pattern == 'sim':
+        micromirror_parameters[
+            'illumination_filename'] = 'illumination_pattern.raw'
+    elif pattern == 'widefield':
+        micromirror_parameters[
+            'illumination_filename'] = 'widefield_pattern.raw'        
     micromirrors = dmd.Micromirror_Subprocess(**micromirror_parameters)
 
     laser_shutters = shutters.Laser_Shutters(colors=[c[0] for c in colors])

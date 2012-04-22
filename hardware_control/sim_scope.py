@@ -127,7 +127,10 @@ def z_t_series(
             'illumination_filename'] = 'illumination_pattern.raw'
     elif pattern == 'widefield':
         micromirror_parameters[
-            'illumination_filename'] = 'widefield_pattern.raw'        
+            'illumination_filename'] = 'widefield_pattern.raw'
+        print "Using widefield pattern"
+    else:
+        raise UserWarning("'pattern' must be 'sim' or 'widefield'")
     micromirrors = dmd.Micromirror_Subprocess(**micromirror_parameters)
 
     laser_shutters = shutters.Laser_Shutters(colors=[c[0] for c in colors])
@@ -267,14 +270,24 @@ if __name__ == '__main__':
 ##        colors=[('488', 'f3')]
 ##        )
 
+##    filenames, t_points, z_points = z_t_series(
+##        time_delays=[None],
+####        z_positions=[0],
+##        z_positions=range(-100, 100, 1),
+##        repetition_period_microseconds='4500',
+####        illumination_microseconds=100, #important for widefield
+##        pattern='sim',
+##        colors=[('488', 'f1')]
+##        )
+
     filenames, t_points, z_points = z_t_series(
-        time_delays=[None],
+        time_delays=[0]*5,
 ##        z_positions=[0],
-        z_positions=range(-10,10,5),
+        z_positions=range(-20, 40, 2), 
         repetition_period_microseconds='4500',
-##        illumination_microseconds=100, #important for widefield
+##        illumination_microseconds=1200, #important for widefield
         pattern='sim',
-        colors=[('488', 'f1'), ('488', 'f2')]
+        colors=[('488', 'f1')]
         )
 
     

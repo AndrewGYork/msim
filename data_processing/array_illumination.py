@@ -29,6 +29,10 @@ def get_lattice_vectors(
     show_interpolation=False,
     show_calibration_steps=False,
     show_lattice=False):
+
+    if len(filename_list) < 1:
+        raise UserWarning('Filename list is empty.')
+    
     """Given a swept-field confocal image stack, finds
     the basis vectors of the illumination lattice pattern."""
     if lake is not None:
@@ -68,10 +72,14 @@ def get_lattice_vectors(
         shift_vector = lake_shift_vector
         """The offset vector is now cheap to compute"""
         first_image_average = numpy.zeros((xPix, yPix), dtype=numpy.float)
-        for f in filename_list:
+        print "Computing average of first image..."
+        for i, f in enumerate(filename_list):
             first_image_average += load_image_slice(
                 filename=f, xPix=xPix, yPix=yPix, preframes=preframes,
                 which_slice=0)
+            sys.stdout.write('\rAdding image %i'%(i))
+            sys.stdout.flush()
+        print
         offset_vector = get_offset_vector(
             image=first_image_average,
             direct_lattice_vectors=direct_lattice_vectors,
@@ -79,10 +87,14 @@ def get_lattice_vectors(
             show_interpolation=show_interpolation)
         """And the shift vector is cheap to correct"""
         last_image_average = numpy.zeros((xPix, yPix), dtype=numpy.float)
+        print "Computing average of first image..."
         for f in filename_list:
             last_image_average += load_image_slice(
                 filename=f, xPix=xPix, yPix=yPix, preframes=preframes,
                 which_slice=zPix-1)
+            sys.stdout.write('\rAdding image %i'%(i))
+            sys.stdout.flush()
+        print
         corrected_shift_vector = get_precise_shift_vector(
             direct_lattice_vectors, shift_vector, offset_vector,
             last_image_average, zPix, scan_type, verbose)
@@ -197,8 +209,7 @@ def get_lattice_vectors(
              lake, xPix, yPix, zPix, preframes,
              lake_lattice_vectors, lake_shift_vector, lake_offset_vector,
              bg, bg_zPix, window_size=calibration_window_size,
-             verbose=verbose, show_steps=show_calibration_steps,
-             display=display)
+             verbose=verbose, show_steps=show_calibration_steps)
         return (direct_lattice_vectors, corrected_shift_vector, offset_vector,
                 intensities_vs_galvo_position, background_frame)
 
@@ -1340,14 +1351,11 @@ def generate_lattice(
         return lattice_points
 
 def get_centered_subimage(
-    center_point, window_size, image, background='none', make_copy=True):
+    center_point, window_size, image, background='none'):
     x, y = numpy.round(center_point).astype(int)
     xSl = slice(max(x-window_size-1, 0), x+window_size+2)
     ySl = slice(max(y-window_size-1, 0), y+window_size+2)
-    if make_copy:
-        subimage = numpy.array(image[xSl, ySl])
-    else:
-        subimage = image[xSl, ySl]
+    subimage = numpy.array(image[xSl, ySl])
     if background != 'none':
         subimage -= background[xSl, ySl]
     interpolation.shift(

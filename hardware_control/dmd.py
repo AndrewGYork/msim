@@ -70,7 +70,7 @@ class ALP:
                 (illumination_pattern.shape[0] * repetitions,
                  nSizeX, nSizeY), dtype=numpy.uint8)
             for i in range(repetitions):
-                illumination_pattern_r[i:illumination_pattern.shape[0], :, :
+                illumination_pattern_r[i:illumination_pattern.shape[0]+i, :, :
                                        ] = illumination_pattern
             illumination_pattern = illumination_pattern_r
         if additional_preframes is not None:
@@ -203,8 +203,9 @@ except:
             stderr=subprocess.PIPE)
         for i in range(2):
             print self.subprocess.stdout.readline(),
-        self.apply_settings(illuminate_time, picture_time,
-                            illumination_filename,
+        self.apply_settings(illuminate_time=illuminate_time,
+                            picture_time=picture_time,
+                            illumination_filename=illumination_filename,
                             first_frame=first_frame, last_frame=last_frame)
         return None
 
@@ -267,12 +268,13 @@ except:
 if __name__ == '__main__':
     print "Creating a micromirror subprocess..."
     micromirrors = Micromirror_Subprocess(
-        illuminate_time=2200, picture_time=4500)
+        illuminate_time=2200, picture_time=4500,
+        illumination_filename='widefield_pattern.raw')
     for i in range(3):
         micromirrors.apply_settings(
             illuminate_time=2200, picture_time=4500,
             illumination_filename='illumination_pattern.raw',
-            first_frame=1, last_frame=1,
+            first_frame=3, last_frame=3,
             repetitions=20, additional_preframes=3)
         micromirrors.display_pattern()
         micromirrors.readout()

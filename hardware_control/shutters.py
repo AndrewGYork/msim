@@ -5,15 +5,18 @@ class Laser_Shutters:
         self.ports = {}
         self.states = {}
         if colors == 'all':
-            colors = ['488', '561']
-        for c, p in (('488', 4), ('561', 5)): #Have to pick the right ports
+            colors = ['405', '488', '561']
+        for c, p in ( #Have to pick the right ports
+            ('405', 8),
+            ('488', 4),
+            ('561', 5)):
             if c in colors:
                 try:
                     self.ports[c] = serial.Serial(p, 9600, timeout=1)
                 except:
                     raise UserWarning(
                         "Can't open port for the " + c + " shutter.")
-        for c in self.ports.keys():
+        for c in sorted(self.ports.keys()):
             self._robust_shut(c)
             self.states[c] = False
 
@@ -83,13 +86,17 @@ class Laser_Shutters:
 
     def close(self):
         print "Closing shutters and shutter ports..."
-        for c, p in self.ports.items():
+        for c, p in sorted(self.ports.items()):
             self._robust_shut(c)
             p.close()        
 
 if __name__ == '__main__':
     try:
         s = Laser_Shutters()
+        s.open(color='405')
+        time.sleep(1)
+        s.shut(color='405')
+        time.sleep(1)
         s.open(color='488')
         time.sleep(1)
         s.shut(color='488')
@@ -98,9 +105,11 @@ if __name__ == '__main__':
         time.sleep(1)
         s.shut(color='561')
         time.sleep(1)
+        s.open(color='405')
         s.open(color='488')
         s.open(color='561')
         time.sleep(1)
+        s.shut(color='405')
         s.shut(color='488')
         s.shut(color='561')
     except:

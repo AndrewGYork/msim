@@ -32,7 +32,7 @@ def generate_lattice(
     lattice_points = lp[valid]
     return lattice_points
 
-half_distance = 9
+half_distance = 8
 step_size = 1
 image_pix = (768, 1024)
 preframes = 3
@@ -80,7 +80,6 @@ for y in range(0, delta_y, step_size):
 ##            fig.canvas.draw()
 ##            raw_input('Hit enter to continue...')
 
-
 metadata = open('illumination_pattern.txt', 'wb')
 metadata.write('Data type: 8-bit unsigned integers\r\n')
 metadata.write('Dimensions: %i by %i pixels\r\n'%(
@@ -88,3 +87,4 @@ metadata.write('Dimensions: %i by %i pixels\r\n'%(
 metadata.write('Slices: %i\r\n'%(illumination_pattern.shape[0]))
 metadata.close()
 
+del illumination_pattern

@@ -1,4 +1,4 @@
-import os, time
+import os, time, re, string
 import pco, dmd, stage, shutters
 import numpy
 
@@ -13,10 +13,66 @@ def get_save_file():
         initialdir='D:\\SIM_data',
         initialfile='image.raw'))) #Careful about Unicode here!
     tkroot.destroy()
-    if data_file == '':
+    print "Data filename:", repr(data_file)
+    if data_file == '.':
         raise UserWarning('No save file selected')
     save_path, file_basename = os.path.split(data_file)
     return save_path, file_basename
+
+def max_proj_stack(
+    data_filenames_list=None,
+    data_filename_pattern='image_z????.raw',
+    data_folder=None,
+    data_dimensions=(480, 480)):
+    """If data_filenames_list is given, data_filename is ignored"""
+
+    import glob, os, sys
+    import numpy
+
+    if data_filenames_list is None:
+        if data_folder is None:
+            import Tkinter, tkFileDialog
+            tkroot = Tkinter.Tk()
+            tkroot.withdraw()
+            data_folder = tkFileDialog.askdirectory(
+                title=("Choose a data folder"))
+            tkroot.destroy()
+        data_filename_pattern = os.path.join(data_folder, data_filename_pattern)
+        data_filenames_list = sorted(glob.glob(data_filename_pattern))
+    elif data_folder is None: #Still need to know this, but we can guess.
+        data_folder = os.path.dirname(data_filenames_list[0])
+
+    print data_filenames_list
+
+    if len(data_filenames_list) > 0:
+        max_projections = numpy.zeros(
+            ((len(data_filenames_list),) + data_dimensions), dtype=numpy.uint16)
+        pix_per_slice = data_dimensions[0] * data_dimensions[1]
+        for i, f in enumerate(data_filenames_list):
+            print "Projecting:", os.path.split(f)[1]
+            raw_data = numpy.fromfile(f, dtype=numpy.uint16)
+            raw_data = raw_data.reshape(
+                (raw_data.shape[0]/pix_per_slice,) + data_dimensions)
+            max_projections[i, :, :] = raw_data.max(axis=0)
+
+        basename = ('stack_of_max_projections_' +
+                    os.path.splitext(
+                        os.path.split(data_filename_pattern
+                                      )[1])[0].replace('?','X'))
+        max_projections.tofile(
+            os.path.join(data_folder, basename + '.raw'))
+
+        notes = open(os.path.join(
+            data_folder, basename + '.txt'), 'wb')
+        notes.write("Left/right: %i pixels\r\n"%(max_projections.shape[2]))
+        notes.write("Up/down: %i pixels\r\n"%(max_projections.shape[1]))
+        notes.write("Number of images: %i\r\n"%(max_projections.shape[0]))
+        notes.write("Data type: 16-bit unsigned integers\r\n")
+        notes.write("Byte order: Intel (little-endian))\r\n")
+        notes.close()
+    else:
+        print "No files found."
+    return None
 
 def snap(
     colors=['488'],
@@ -173,6 +229,16 @@ def z_t_series(
                             ', z= %+0.3f microns'%(z*0.1) +
                             ', t= %0.4f seconds\r\n'%(t))
             index.close()
+        data_filename_pattern = (
+            basename + '_c???' +
+            re.sub('[%s]'%string.digits, '?', t_index) +
+            re.sub('[%s]'%string.digits, '?', z_index) +
+            ext) #Hard-coded ???? lengths...
+        print "\nFilename pattern:", data_filename_pattern
+        max_proj_stack(
+            data_filenames_list=[os.path.join(save_path, f) for f in filenames],
+            data_filename_pattern=data_filename_pattern,
+            data_dimensions=(480, 480)) #Hard-coded dimensions, too...
     return filenames, t_points, z_points
 
 if __name__ == '__main__':
@@ -191,12 +257,13 @@ if __name__ == '__main__':
 ##        )
 
     filenames, t_points, z_points = z_t_series(
-        time_delays=[None],
-        z_positions=range(-20,20,10),
+        time_delays=[0, 1],
+##        z_positions=[0],
+        z_positions=range(-10,10,6),
         repetition_period_microseconds='4500',
 ##        illumination_microseconds=100, #important for widefield
         pattern='sim',
-        colors=['488']
+        colors=['488', '561']
         )
 
     

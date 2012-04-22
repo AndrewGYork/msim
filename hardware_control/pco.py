@@ -188,10 +188,12 @@ class Edge:
 
         if save_path is None:
             save_path = os.getcwd()
+        save_path = str(save_path)
 
         dw1stImage, dwLastImage = ctypes.c_uint32(0), ctypes.c_uint32(0)
         wBitsPerPixel = ctypes.c_uint16(14) #14 bits for the pco.edge, right?
         dwStatusDll, dwStatusDrv = ctypes.c_uint32(), ctypes.c_uint32()
+        print "Saving:", repr(os.path.join(save_path, file_name))
         file_pointer = ctypes.c_void_p(
             libc.fopen(os.path.join(save_path, file_name), "wb"))
         bytes_per_pixel = ctypes.c_uint32(2)
@@ -228,6 +230,8 @@ class Edge:
                     libc.fclose(file_pointer)
 
         libc.fclose(file_pointer)
+        print "Saving:", repr(os.path.splitext(os.path.join(
+            save_path, file_name))[0] + '.txt')
         file_info = open(os.path.splitext(os.path.join(
             save_path, file_name))[0] + '.txt', 'wb')
         file_info.write('Left/right: %i pixels\r\n'%(self.wXRes.value))

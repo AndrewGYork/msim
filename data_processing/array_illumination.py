@@ -1,4 +1,4 @@
-import os, sys, cPickle, pprint, subprocess, time
+import os, sys, cPickle, pprint, subprocess, time, random
 from itertools import product
 import numpy, pylab
 from scipy.ndimage import gaussian_filter, median_filter, interpolation
@@ -9,6 +9,7 @@ def get_lattice_vectors(
     lake=None,
     bg=None,
     use_lake_lattice=False,
+    use_all_lake_parameters=False,
     xPix=512,
     yPix=512,
     zPix=201,
@@ -57,7 +58,12 @@ def get_lattice_vectors(
         print "Lake initial position:"
         print lake_offset_vector
         print " Detecting sample illumination parameters..."
-    if use_lake_lattice and (lake is not None):
+    if use_all_lake_parameters and (lake is not None):
+        direct_lattice_vectors = lake_lattice_vectors
+        shift_vector = lake_shift_vector
+        corrected_shift_vector = lake_shift_vector
+        offset_vector = lake_offset_vector
+    elif use_lake_lattice and (lake is not None):
         """Keep the lake's lattice and crude shift vector"""
         direct_lattice_vectors = lake_lattice_vectors
         shift_vector = lake_shift_vector
@@ -229,8 +235,9 @@ def enderlein_image_parallel(
         images = {}
         images['enderlein_image'] = numpy.fromfile(
             enderlein_image_name, dtype=float
-            ).reshape(new_grid_x.shape[0], new_grid_y.shape[0])
+            ).reshape(new_grid_xrange[2], new_grid_yrange[2])
     else:
+        start_time = time.clock()
         if num_processes == 1:
             images = enderlein_image_subprocess(**input_arguments)
         else:
@@ -240,12 +247,13 @@ def enderlein_image_parallel(
             input_arguments['display'] = False #Annoying for parallel
             input_arguments['verbose'] = False #Annoying for parallel
             
-            step_boundaries = range(0, steps, 5) + [steps]
+            step_boundaries = range(0, steps, 10) + [steps]
             step_boundaries = [
                 (step_boundaries[i], step_boundaries[i+1] - 1)
                 for i in range(len(step_boundaries)-1)]
             running_processes = {}
             first_harvest = True
+            random_prefix = '%06i_'%(random.randint(0, 999999))
             while len(running_processes) > 0 or len(step_boundaries) > 0:
                 """Load up the subprocesses"""
                 while (len(running_processes) < num_processes and
@@ -253,7 +261,8 @@ def enderlein_image_parallel(
                     sb = step_boundaries.pop(0)
                     (input_arguments['start_frame'],
                      input_arguments['end_frame']) = (sb)
-                    output_filename = '%i_%i_intermediate_data.temp'%(sb)
+                    output_filename = (random_prefix +
+                                       '%i_%i_intermediate_data.temp'%(sb))
                     sys.stdout.write(
                         "\rProcessing frames: " + repr(sb[0]) + '-' +
                         repr(sb[1]) + ' '*10)
@@ -292,6 +301,8 @@ cPickle.dump(sub_images, open('%s', 'wb'), protocol=2)
                     running_processes.pop(p)
                 """Chill for a second"""
                 time.sleep(0.2)
+        end_time = time.clock()
+        print "Elapsed time: %0.2f seconds"%(end_time - start_time)
         images['enderlein_image'].tofile(enderlein_image_name)
         if make_widefield_image:
             images['widefield_image'].tofile(basename + '_widefield.raw')
@@ -303,6 +314,7 @@ cPickle.dump(sub_images, open('%s', 'wb'), protocol=2)
                      interpolation='nearest', cmap=pylab.cm.gray)
         pylab.colorbar()
         fig.show()
+    return images
 
 def enderlein_image_subprocess(
     data_filename, lake_filename, background_filename,
@@ -1088,8 +1100,7 @@ def get_shift(shift_vector, frame_number):
 
 def show_lattice_overlay(
     image_data, direct_lattice_vectors, offset_vector, shift_vector):
-    fig = pylab.gcf()
-    pylab.clf()
+    fig = pylab.figure()
     s = 0
     while True:
         pylab.clf()
@@ -1180,9 +1191,8 @@ def spot_intensity_vs_galvo_position(
         print "Loading", os.path.split(background_name)[1]
         bg = numpy.fromfile(background_name, dtype=float).reshape(xPix, yPix)
     else:
-        if verbose:
-            print "\nCalculating illumination spot intensities..."
-            print "Constructing background image..."
+        print "\nCalculating illumination spot intensities..."
+        print "Constructing background image..."
         background_image_data = load_image_data(
             background_filename, xPix, yPix, background_zPix, preframes)
         bg = numpy.zeros((xPix, yPix), dtype=float)
@@ -1190,7 +1200,7 @@ def spot_intensity_vs_galvo_position(
             bg += background_image_data[z, :, :]
         bg *= 1.0 / background_image_data.shape[0]
         del background_image_data
-        if verbose: print "Background image complete."
+        print "Background image complete."
 
         lake_image_data = load_image_data(
             lake_filename, xPix, yPix, zPix, preframes)
@@ -1198,11 +1208,11 @@ def spot_intensity_vs_galvo_position(
         """A dict of dicts. Element [i, j][z] gives the intensity of the
         i'th, j'th spot in the lattice, in frame z"""
         if show_steps: fig = pylab.figure()
+        print "Computing flat-field calibration..."
         for z in range(lake_image_data.shape[0]):
             im = lake_image_data[z, :, :]
-            if verbose:
-                sys.stdout.write("\rCalibration image %i"%(z))
-                sys.stdout.flush()
+            sys.stdout.write("\rCalibration image %i"%(z))
+            sys.stdout.flush()
             lattice_points, i_list, j_list = generate_lattice(
                 image_shape=(xPix, yPix),
                 lattice_vectors=direct_lattice_vectors,

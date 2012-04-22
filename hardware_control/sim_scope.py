@@ -1,4 +1,4 @@
-import subprocess, sys, os, time
+import os, time
 import pco, dmd, stage
 
 def snap(file_basename='image.raw', save_path=None, preframes=3):
@@ -10,13 +10,15 @@ def z_t_series(
     file_basename='image.raw', save_path=None, preframes=3):
     """Take a sequence of SIM frames while moving the piezo"""
 
-    micromirrors = dmd.Micromirror_Subprocess(delay=0.020)
+    micromirror_delay = 0.02
+    micromirrors = dmd.Micromirror_Subprocess(delay=micromirror_delay)
     print "Preframes to be discarded:", preframes
 
     if z_positions[0] is not None:
         piezo = stage.Z()
     camera = pco.Edge()
-    camera.apply_settings(trigger="external trigger/software exposure control")
+    trigger = "external trigger/software exposure control"
+    camera.apply_settings(trigger=trigger)
     camera.arm()
     basename, ext = os.path.splitext(file_basename)
     filenames, z_points, t_points = [], [], []
@@ -36,8 +38,6 @@ def z_t_series(
                 z_index = ''
             file_name = basename + t_index + z_index + ext
             filenames.append(file_name)
-            z_points.append(z)
-            t_points.append(time.clock())
             print file_name
             print "Triggering micromirrors..."
             micromirrors.display_pattern() #DMD should fire shortly after this
@@ -46,9 +46,30 @@ def z_t_series(
                     num_images=micromirrors.num_images, preframes=preframes,
                     file_name=file_name, save_path=save_path)
             except:
-                print "\n Recording failed \n"
+                print "\n Recording failed"
+                print "Retrying once.\n"
+                print "Micromirrors postmortem:"
                 micromirrors.close()
-                raise
+                print "Reopening micromirrors..."
+                micromirrors = dmd.Micromirror_Subprocess(
+                    delay=micromirror_delay)
+                print "Closing and reopening camera..."
+                camera.close()
+                camera = pco.Edge()
+                camera.apply_settings(trigger=trigger)
+                camera.arm()
+                print "Triggering micromirrors..."
+                micromirrors.display_pattern()
+                try:
+                    camera.record_to_file(
+                        num_images=micromirrors.num_images, preframes=preframes,
+                        file_name=file_name, save_path=save_path)
+                except:
+                    print "Hm, a second failure. What the heck?"
+                    micromirrors.close()
+                    raise
+            z_points.append(z)
+            t_points.append(time.clock())
             print "DMD subprocess report:"
             micromirrors.readout()
     camera.close()
@@ -67,12 +88,12 @@ def z_t_series(
     return filenames, t_points, z_points
 
 if __name__ == '__main__':
-##    snap()
+    snap()
 
-    filenames, t_points, z_points = z_t_series(
-        time_delays=[None],
-        z_positions=range(-15, 50, 1),
-        file_basename='u2os_488.raw')
+##    filenames, t_points, z_points = z_t_series(
+##        time_delays=[None],
+##        z_positions=range(-20, 20, 1),
+##        file_basename='beads_488.raw')
     
 ##    import numpy, pylab
 ##    fig = pylab.figure()

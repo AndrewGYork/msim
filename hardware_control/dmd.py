@@ -137,11 +137,13 @@ micromirrors.close()
             print '*', self.subprocess.stdout.readline(),
 
     def close(self):
-        self.subprocess.stdin.write('done\n')
-        report = self.subprocess.communicate()
-        for i in report:
-            print i
-        return None
+        try:
+            self.subprocess.stdin.write('done\n')
+        finally:
+            report = self.subprocess.communicate()
+            for i in report:
+                print i
+            return None
 
 if __name__ == '__main__':
     print "Creating a micromirror subprocess..."

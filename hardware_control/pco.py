@@ -209,8 +209,8 @@ class Edge:
                         print self.buffer_numbers[which_buf].value, "is ready."
                     break
                 if num_polls > 5e6:
-                    raise UserWarning("After five million polls, no buffer.")
                     libc.fclose(file_pointer)
+                    raise UserWarning("After five million polls, no buffer.")
 
             if which_im >= preframes:
                 response = libc.fwrite(

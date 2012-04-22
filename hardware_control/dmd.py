@@ -1,12 +1,15 @@
 import ctypes
 import numpy
 
-DMD_api = ctypes.cdll.LoadLibrary('alpD41')
-_ALP_DEFAULT = 0
-_ALP_OK = 0
-_ALP_DEV_DMDTYPE = 2021
-_ALP_DMDTYPE_XGA_055X = 6
-_ALP_DATA_FORMAT = 2110
+try:
+    DMD_api = ctypes.cdll.LoadLibrary('alpD41')
+    _ALP_DEFAULT = 0
+    _ALP_OK = 0
+    _ALP_DEV_DMDTYPE = 2021
+    _ALP_DMDTYPE_XGA_055X = 6
+    _ALP_DATA_FORMAT = 2110
+except OSError:
+    print '*'*40 + "\n\nFailed to load the DMD API.\n\n" + '*'*40
 
 def _check(return_code):
     if return_code != _ALP_OK:
@@ -24,8 +27,8 @@ class ALP:
         return None
 
     def apply_settings(
-        self, illumination_filename='illumination_pattern.raw',
-        illuminate_time=2200, picture_time=4500, trigger_delay=0):
+        self, illuminate_time, picture_time=4500, trigger_delay=0,
+        illumination_filename='illumination_pattern.raw'):
         """illuminate_time, picture_time, and trigger_delay are in
         microseconds
 
@@ -84,13 +87,13 @@ class ALP:
         print " ALP data format:", paramVal.value
         return num_frames
 
-    def apply_widefield_settings(
-        self, illuminate_time=250, picture_time=4500):
-        if picture_time == 4500 and illuminate_time > 2200:
-            raise UserWarning("illuminate_time is too long.")
-        return self.apply_settings(
-            illumination_filename='widefield_pattern.raw',
-            illuminate_time=illuminate_time, picture_time=picture_time)
+##    def apply_widefield_settings(
+##        self, illuminate_time=250, picture_time=4500):
+##        if picture_time == 4500 and illuminate_time > 2200:
+##            raise UserWarning("illuminate_time is too long.")
+##        return self.apply_settings(
+##            illumination_filename='widefield_pattern.raw',
+##            illuminate_time=illuminate_time, picture_time=picture_time)
 
     def display_pattern(self):
         """Start sequence"""
@@ -108,9 +111,8 @@ class ALP:
 
 class Micromirror_Subprocess:
     def __init__(
-        self, delay=0.01,
-        illuminate_time=None, picture_time=4500,
-        pattern='sim'):
+        self, illuminate_time, picture_time=4500, delay=0.01,
+        illumination_filename='illumination_pattern.raw'):
         """To synchronize the DMD and the camera polling, we need two
         processes. 'delay' determines how long the DMD subprocess
         waits after a trigger message before displaying a pattern.
@@ -119,35 +121,49 @@ class Micromirror_Subprocess:
         proc.stdout.readline()."""
         import subprocess, sys
 
-        if illuminate_time is None:
-            if pattern == 'sim':
-                illuminate_time = 2200
-            if pattern == 'widefield':
-                illuminate_time = 250
-
         cmdString = """
 import dmd, sys, time
 micromirrors = dmd.ALP()
-num_frames = %s
-sys.stdout.write(repr(int(num_frames)) + '\\n')
+sys.stdout.flush()
 while True:
-    sys.stdout.flush()
     cmd = raw_input()
     if cmd == 'done':
         break
-    time.sleep(%s) #Give the camera time to arm
-    micromirrors.display_pattern()
+    elif cmd == 'apply_settings':
+        illuminate_time = int(raw_input())
+        picture_time = int(raw_input))
+        illumination_filename = raw_input()
+        num_frames = micromirrors.apply_settings(
+            illuminate_time=illuminate_time, picture_time=picture_time,
+            illumination_filename=illumination_filename)
+        sys.stdout.write(repr(int(num_frames)) + '\\n')
+    else:
+        time.sleep(%s) #Give the camera time to arm
+        micromirrors.display_pattern()
+    sys.stdout.flush()
 micromirrors.close()
-"""%({'sim': 'micromirrors.apply_settings',
-      'widefield': 'micromirrors.apply_widefield_settings'}[pattern] +
-     '(illuminate_time=%i, picture_time=%i,)'%(illuminate_time, picture_time),
-     repr(delay))
+"""%(repr(delay))
+        print cmdString
+        raw_input()
         self.subprocess = subprocess.Popen( #python vs. pythonw on Windows?
             [sys.executable, '-c %s'%cmdString],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
-        for i in range(8):
+        for i in range(8): #FIXME!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            print self.subprocess.stdout.readline(),
+        self.apply_settings(illuminate_time, picture_time,
+                            illumination_filename)
+        print "Num. images:", self.num_images
+        return None
+
+    def apply_settings(illuminate_time, picture_time=4500,
+                       illumination_filename='illumination_pattern.raw'):
+        self.subprocess.stdin.write('apply_settings\n')
+        self.subprocess.stdin.write(repr(illuminate_time) + '\n')
+        self.subprocess.stdin.write(repr(picture_time) + '\n')
+        self.subprocess.stdin.write(illumination_filename + '\n')
+        for i in range(8): #FIXME!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             print self.subprocess.stdout.readline(),
         try:
             self.num_images = int(self.subprocess.stdout.readline())
@@ -155,7 +171,6 @@ micromirrors.close()
             print "\n\nSomething's wrong... is the DMD on and plugged in?\n\n"
             print "\n\nI'm looking at you, Temprine!\n\n"
             raise
-        print "Num. images:", self.num_images
         return None
     
     def display_pattern(self):

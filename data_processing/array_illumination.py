@@ -309,7 +309,7 @@ cPickle.dump(sub_images, open('%s', 'wb'), protocol=2)
             images['confocal_image'].tofile(basename + '_confocal.raw')
     if display:
         fig = pylab.figure()
-        pylab.imshow(enderlein_image,
+        pylab.imshow(images['enderlein_image'],
                      interpolation='nearest', cmap=pylab.cm.gray)
         pylab.colorbar()
         fig.show()
@@ -1340,11 +1340,14 @@ def generate_lattice(
         return lattice_points
 
 def get_centered_subimage(
-    center_point, window_size, image, background='none'):
+    center_point, window_size, image, background='none', make_copy=True):
     x, y = numpy.round(center_point).astype(int)
     xSl = slice(max(x-window_size-1, 0), x+window_size+2)
     ySl = slice(max(y-window_size-1, 0), y+window_size+2)
-    subimage = image[xSl, ySl]
+    if make_copy:
+        subimage = numpy.array(image[xSl, ySl])
+    else:
+        subimage = image[xSl, ySl]
     if background != 'none':
         subimage -= background[xSl, ySl]
     interpolation.shift(

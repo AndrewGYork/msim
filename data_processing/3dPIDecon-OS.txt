@@ -1,0 +1,172 @@
+OS = getInfo("os.name");
+print(OS);
+if (startsWith(OS, "Wind")){
+	slash = "\\";
+}
+else{
+	slash = "/";
+}
+print(slash);
+
+//Dialogs to open RAW Enderlein Stacks and PSF file
+//******************
+for (i=0; i<2; i++){
+	if (i == 0)
+		path = File.openDialog("Select your Blurred File");
+	else
+		path = File.openDialog("Select your PSF File");
+
+	dir = File.getParent(path);
+	name = File.getName(path);
+	print("Path:", path);
+	print("Name:", name);
+	print("Directory:", dir);
+	ends = endsWith(name, "raw");
+	if (ends){
+		Dialog.create("Select Raw file parameters");
+		Dialog.addNumber("Width:", 960);
+		Dialog.addNumber("Height", 960);
+		Dialog.addNumber("Number of Images", 2);
+		Dialog.addNumber("Images per Volume", 1);
+		Dialog.show();
+		width = Dialog.getNumber();
+ 		height = Dialog.getNumber();
+		images = Dialog.getNumber();
+		depth = Dialog.getNumber();
+		numVolumes = (images - images % depth) / depth;
+		run("Raw...", "open=path image=[64-bit Real] width=width height=height offset=0 number=images gap=0 little-endian use");
+		BlurrStackID = getImageID();
+		EndStackName = name;
+		EndDir = dir;
+		print(BlurrStackID);
+		if (images > nSlices)
+			images = nSlices;
+		print(images);
+	}
+	else
+		open(path); // open the file
+		PSFFileName = path;
+		PSFID = getImageID();
+}
+
+
+
+//Parameters for Decon
+//******************
+Dialog.create("Select Deconvolution Parameters");
+Methoditems = newArray("MRNSD", "WPL", "CGLS", "HyBR");
+Dialog.addChoice("Method", Methoditems, Methoditems[1])
+Dialog.addNumber("Iterations:", 100);
+Dialog.show();
+Methodtype = Dialog.getChoice();
+MaxIter = Dialog.getNumber();
+print(Methodtype);
+
+if (matches(Methodtype, "WPL")){
+	boundary = "REFLEXIVE"; //available options: REFLEXIVE, PERIODIC, ZERO
+	resizing = "AUTO"; // available options: AUTO, MINIMAL, NEXT_POWER_OF_TWO
+	output = "FLOAT"; // available options: SAME_AS_SOURCE, BYTE, SHORT, FLOAT  
+	precision = "DOUBLE"; //available options: SINGLE, DOUBLE
+	threshold = "-1"; //if -1, then disabled
+	maxIters = d2s(MaxIter,0);
+	nOfThreads = "2";
+	showIter = "false";
+	gamma = "0";
+	filterXY = "1.0";
+	filterZ = "1.0";
+	normalize = "false";
+	logMean = "false";
+	antiRing = "true";
+	changeThreshPercent = "0.01";
+	db = "false";
+	detectDivergence = "true";
+	print(maxIters);
+}
+
+//Setup directories structure for decon and temporary file generation
+//******************
+TempDir = EndDir + slash + "temp";
+
+if (File.isDirectory(TempDir)){
+	print("Temp dir exists");
+	list = getFileList(TempDir);
+	for (i=0; i<list.length; i++){
+		File.delete(TempDir + slash + list[i]);}
+	File.delete(TempDir);
+}
+
+File.makeDirectory(TempDir);
+
+DeconDir = EndDir + slash + "decon";
+
+if (File.isDirectory(DeconDir)){
+	print("Decon dir exists");
+	list = getFileList(DeconDir);
+	for (i=0; i<list.length; i++){
+		File.delete(DeconDir + slash + list[i]);}
+	File.delete(DeconDir);
+}
+
+File.makeDirectory(DeconDir);
+
+FilesForDecon = newArray(numVolumes);
+DeblurredFiles = newArray(numVolumes);
+
+
+//Loop to setup individual files for feeding decon process
+//******************
+for(i=0;i<numVolumes;i++){
+	selectImage(BlurrStackID);
+	Tempname = "volume_" + d2s(i+1,0)+ ".tif";
+	DupExecString = "title=" + Tempname + " duplicate range=" + (i*depth+1) + "-" + ((i+1)*depth);
+	print(DupExecString);
+	run("Duplicate...", DupExecString);
+	VolumeFileName = TempDir + slash + Tempname;	
+	FilesForDecon[i] = VolumeFileName;
+	save(VolumeFileName);
+	close();
+	print(VolumeFileName);
+	DeblurFileName = DeconDir + slash + Tempname;
+	DeblurredFiles[i] = DeblurFileName;
+}
+//	printArray(FilesForDecon);
+//	printArray(DeblurredFiles);
+
+//Loop for Decon process
+//******************
+for(i=0;i<numVolumes;i++){
+	showStatus("Deconvolution in process...");
+	pathToBlurredImage = FilesForDecon[i];
+	pathToPsf = PSFFileName;
+	pathToDeblurredImage = DeblurredFiles[i];
+	call("edu.emory.mathcs.restoretools.iterative.ParallelIterativeDeconvolution3D.deconvolveWPL", pathToBlurredImage, pathToPsf, pathToDeblurredImage, boundary, resizing, output, precision, threshold, maxIters, nOfThreads, showIter, gamma, filterXY, filterZ, normalize, logMean, antiRing, changeThreshPercent, db, detectDivergence);
+}
+showStatus("Deconvolution is complete.");
+
+//Section to create a TIFF stack of the deconvolved images
+//******************
+selectImage(PSFID);
+close();
+list = getFileList(DeconDir);
+for (i=0; i<list.length; i++){
+//	open(DeblurredFiles[i]);
+	File.delete(FilesForDecon[i]);
+}
+File.delete(TempDir);
+//run("Images to Stack", "name=DeblurredStack title=[] use");
+
+//im_sequence_exec_str = "open=" + DeblurredFiles[0] + " number=" + list.length + " starting=1 increment=1 scale=100 file=[] or=[] sort";
+//run("Image Sequence...", im_sequence_exec_str);
+//spNameString = split(EndStackName, ".");
+
+//DeBlurStackName = DeconDir + slash + spNameString[0]+"decon";
+//saveAs("Tiff", DeBlurStackName);
+
+
+//Quick function to print the contents of arrays
+//******************
+function printArray(a) {
+      print("");
+      for (i=0; i<a.length; i++)
+          print(i+": "+a[i]);
+}

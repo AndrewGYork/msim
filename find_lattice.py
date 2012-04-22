@@ -1,39 +1,91 @@
-import os, sys, numpy, pylab
-from itertools import product, combinations
-from scipy.ndimage import gaussian_filter
+import os, sys, cPickle, numpy, pylab
+from itertools import product
+from scipy.ndimage import gaussian_filter, interpolation
 from scipy.spatial import Delaunay
+from scipy.signal import hann
+
+##def load_image_data(filename, xPix=512, yPix=512, zPix=201):
+##    """Load the 16-bit raw data from the Visitech Infinity"""
+##    return numpy.memmap(
+##        filename, dtype=numpy.uint16, mode='r'
+##        ).reshape(zPix, xPix, yPix) #FIRST dimension is image number
 
 def load_image_data(filename, xPix=512, yPix=512, zPix=201):
     """Load the 16-bit raw data from the Visitech Infinity"""
-    return numpy.memmap(
-        filename, dtype=numpy.uint16, mode='r',
+    bytes_per_pixel = 2
+    return numpy.fromfile(
+        filename, dtype=numpy.uint16
         ).reshape(zPix, xPix, yPix) #FIRST dimension is image number
 
-def get_fft_abs(filename, image_data):
+def load_image_slice(filename, xPix, yPix, which_slice=0):
+    """Load a frame of the 16-bit raw data from the Visitech Infinity"""
+    bytes_per_pixel = 2
+    data_file = open(filename, 'rb')
+    data_file.seek(which_slice * xPix*yPix*bytes_per_pixel)
+    return numpy.fromfile(
+        data_file, dtype=numpy.uint16, count=xPix*yPix
+        ).reshape(xPix, yPix)
+
+def load_fft_slice(fft_data_folder, xPix, yPix, which_slice=0):
+    bytes_per_pixel = 16
+    filename = os.path.join(fft_data_folder, '%06i.dat'%(which_slice))
+    data_file = open(filename, 'rb')
+    return numpy.memmap(data_file, dtype=numpy.complex128, mode='r'
+                        ).reshape(xPix, yPix)
+
+def get_fft_abs(filename, image_data, show_steps=False):
     basename = os.path.splitext(filename)[0]
     fft_abs_name = basename + '_fft_abs.npy'
-    fft_data_name = basename + '_fft_data.raw'
+    fft_avg_name = basename + '_fft_avg.npy'
+    fft_data_folder = basename + '_fft_data'
+    """FFT data is stored as a sequence of raw binary files, one per
+    2D z-slice. The files are named 000000.dat, 000001.dat, etc."""
     
-    if os.path.exists(fft_abs_name) and os.path.exists(fft_data_name):
+    if (os.path.exists(fft_abs_name) and
+        os.path.exists(fft_avg_name) and
+        os.path.exists(fft_data_folder)):
         print "Loading", os.path.split(fft_abs_name)[1]
         fft_abs = numpy.load(fft_abs_name)
-        print "Loading", os.path.split(fft_data_name)[1]
-        fft_data = numpy.memmap(fft_data_name, dtype=numpy.complex128, mode='r'
-                                ).reshape(image_data.shape)
+        print "Loading", os.path.split(fft_avg_name)[1]
+        fft_avg = numpy.load(fft_avg_name)
     else:
-        print "Generating fft_abs and fft_data..."
-        fft_data = numpy.memmap(fft_data_name, dtype=numpy.complex128,
-                                mode='w+', shape=image_data.shape)
+        print "Generating fft_abs, fft_avg and fft_data..."
+        os.mkdir(fft_data_folder)
         fft_abs = numpy.zeros(image_data.shape[1:])
+        fft_avg = numpy.zeros(image_data.shape[1:], dtype=numpy.complex128)
+        window = (hann(image_data.shape[1]).reshape(image_data.shape[1], 1) *
+                  hann(image_data.shape[2]).reshape(1, image_data.shape[2]))
+        if show_steps: fig = pylab.figure()
         for z in range(image_data.shape[0]):
-            fft_data[z, :, :] = numpy.fft.fftshift(#Stored shifted!
-                numpy.fft.fftn(image_data[z, :, :], axes=(0, 1)))
-            fft_abs += numpy.abs(fft_data[z, :, :])
-            sys.stdout.write('\rProcessing slice %i'%(z+1))
+            fft_data = numpy.fft.fftshift(#Stored shifted!
+                numpy.fft.fftn(window * image_data[z, :, :], axes=(0, 1)))
+            fft_data.tofile(os.path.join(fft_data_folder, '%06i.dat'%(z)))
+            fft_abs += numpy.abs(fft_data)
+            if show_steps:
+                pylab.clf()
+                pylab.subplot(1, 3, 1)
+                pylab.title('Windowed slice %i'%(z))
+                pylab.imshow(window * numpy.array(image_data[z, :, :]),
+                             cmap=pylab.cm.gray, interpolation='nearest')
+                pylab.subplot(1, 3, 2)
+                pylab.title('FFT of slice %i'%(z))
+                pylab.imshow(numpy.log(1 + numpy.abs(fft_data)),
+                             cmap=pylab.cm.gray, interpolation='nearest')
+                pylab.subplot(1, 3, 3)
+                pylab.title("Cumulative sum of FFT absolute values")
+                pylab.imshow(numpy.log(1 + fft_abs),
+                             cmap=pylab.cm.gray, interpolation='nearest')
+                fig.show()
+                fig.canvas.draw()
+                raw_input("Hit enter to continue...")
+            fft_avg += fft_data
+            sys.stdout.write('\rFourier transforming slice %i'%(z+1))
             sys.stdout.flush()
+        fft_avg = numpy.abs(fft_avg)
         numpy.save(fft_abs_name, fft_abs)
+        numpy.save(fft_avg_name, fft_avg)
         print
-    return (fft_data, fft_abs)
+    return (fft_data_folder, fft_abs, fft_avg)
 
 def simple_max_finder(a, show_plots=True):
     """Given a 3x3 array with the maximum pixel in the center,
@@ -75,61 +127,77 @@ def combinations_with_replacement(iterable, r):
         if sorted(indices) == list(indices):
             yield tuple(pool[i] for i in indices)
 
-def same_side(point_1, point_2, corner_1, corner_2):
-    cp1 = numpy.cross(
-        (corner_2[0] - corner_1[0], corner_2[1] - corner_1[1]),
-        (point_1[0] - corner_1[0], point_1[1] - corner_1[1]))
-    cp2 = numpy.cross(
-        (corner_2[0] - corner_1[0], corner_2[1] - corner_1[1]),
-        (point_2[0] - corner_1[0], point_2[1] - corner_1[1]))
-    if numpy.dot(cp1, cp2) > 0:
-        return True
-    return False
-
-def in_triangle(point, corners):
-    a, b, c = corners
-    if same_side(point, a, b, c):
-        if same_side(point, b, a, c):
-            if same_side(point, c, a, b):
-                return True
-    return False
-
-def find_bounding_triangle(point, possible_corners):
-    for corners in combinations(possible_corners, 3):
-        if in_triangle(point, corners):
-            return corners
-    raise UserWarning("Point not contained in corners")
+#####
+#####   Leftover code from when I was doing triangulation myself.            
+#####
+##def same_side(point_1, point_2, corner_1, corner_2):
+##    cp1 = numpy.cross(
+##        (corner_2[0] - corner_1[0], corner_2[1] - corner_1[1]),
+##        (point_1[0] - corner_1[0], point_1[1] - corner_1[1]))
+##    cp2 = numpy.cross(
+##        (corner_2[0] - corner_1[0], corner_2[1] - corner_1[1]),
+##        (point_2[0] - corner_1[0], point_2[1] - corner_1[1]))
+##    if numpy.dot(cp1, cp2) > 0:
+##        return True
+##    return False
+##
+##def in_triangle(point, corners):
+##    a, b, c = corners
+##    if same_side(point, a, b, c):
+##        if same_side(point, b, a, c):
+##            if same_side(point, c, a, b):
+##                return True
+##    return False
+##
+##def find_bounding_triangle(point, possible_corners):
+##    for corners in combinations(possible_corners, 3):
+##        if in_triangle(point, corners):
+##            return corners
+##    raise UserWarning("Point not contained in corners")
 
 def three_point_weighted_average(position, corners, values):
     """Given three 2D positions, and three values, computes a weighted
     average of the values for some interior position. Equivalent to
     interpolating with a plane."""
     x, y = position
-##    print
-##    print "x, y:", x, y
     ((x1, y1), (x2, y2), (x3, y3)) = corners
-##    print "Corners:"
-##    print x1, y1
-##    print x2, y2
-##    print x3, y3
     (z1, z2, z3) = values
-##    print "Values:", z1.shape, z2.shape, z3.shape
     denom = y1*(x3 - x2) + y2*(x1 - x3) + y3*(x2 - x1)
     w1 = (y3 - y2)*x + (x2 - x3)*y + x3*y2 - x2*y3
     w2 = (y1 - y3)*x + (x3 - x1)*y + x1*y3 - x3*y1
     w3 = (y2 - y1)*x + (x1 - x2)*y + x2*y1 - x1*y2
-##    print "Weights:"
-##    print w1 * 1.0 / denom
-##    print w2 * 1.0 / denom
-##    print w3 * 1.0 / denom
-##    raw_input()
     return (w1*z1 + w2*z2 + w3*z3) * -1.0 / denom
 
 def spike_filter(fft_abs):
     f = gaussian_filter(numpy.log(1 + fft_abs), sigma=0.5)
+##    fig = pylab.figure()
+##    pylab.imshow(f, cmap=pylab.cm.gray, interpolation='nearest')
+##    pylab.title('Smoothed')
+##    fig.show()
+##    fig.canvas.draw()
+##    raw_input('Hit enter...')
+##    pylab.clf()
     f = f - gaussian_filter(f, sigma=(0, 4))
+##    pylab.imshow(f, cmap=pylab.cm.gray, interpolation='nearest')
+##    pylab.title('Filtered left-right')
+##    fig.show()
+##    fig.canvas.draw()
+##    raw_input('Hit enter...')
+##    pylab.clf()
     f = f - gaussian_filter(f, sigma=(4, 0))
-    f = abs(f)
+##    pylab.imshow(f, cmap=pylab.cm.gray, interpolation='nearest')
+##    pylab.title('Filtered up-down')
+##    fig.show()
+##    fig.canvas.draw()
+##    raw_input('Hit enter...')
+##    pylab.clf()
+    f = f * (f > 0)
+##    pylab.imshow(f, cmap=pylab.cm.gray, interpolation='nearest')
+##    pylab.title('Negative truncated')
+##    fig.show()
+##    fig.canvas.draw()
+##    raw_input('Hit enter...')
+##    pylab.clf()
     f -= f.mean()
     f *= 1.0 / f.std()
     return f
@@ -229,8 +297,8 @@ def get_precise_basis(coords, basis_vectors, fft_abs, tolerance, verbose=False):
     searching = True
     while searching:
         combinations = [
-            c for c in combinations_with_replacement(basis_vectors, num_vectors)
-            ]
+            c for c in combinations_with_replacement(basis_vectors,
+                                                     num_vectors)]
         combination_indices = [
             c for c in combinations_with_replacement((0, 1, 2), num_vectors)]
         for i, comb in enumerate(combinations):
@@ -339,7 +407,7 @@ def get_basis_vectors(fft_abs, coords, extent=15, tolerance=3., verbose=False):
             "Basis vector search failed. Diagnose by running with verbose=True")
 
 def get_shift_vector(
-    fourier_lattice_vectors, fft_data, filtered_fft_abs,
+    fourier_lattice_vectors, fft_data_folder, filtered_fft_abs,
     num_harmonics=3, outlier_phase=1.,
     verbose=True, display=True):
     if verbose: print "\nCalculating shift vector..."
@@ -361,11 +429,22 @@ def get_shift_vector(
                 print "Brightest neighboring pixel:", actual_pix
             harmonic_pixels[-1].append(tuple(actual_pix))
             values[harmonic_pixels[-1][-1]] = []
-    for z in range(fft_data.shape[0]):
+    num_slices = len(os.listdir(fft_data_folder))
+    if verbose: print '\n'
+    for z in range(num_slices):
+        if verbose:
+            sys.stdout.write("\rLoading harmonic pixels from FFT slice %06i"%(z))
+            sys.stdout.flush()
+        fft_data = load_fft_slice(
+            fft_data_folder,
+            xPix=filtered_fft_abs.shape[0],
+            yPix=filtered_fft_abs.shape[1],
+            which_slice=z)
         for hp in harmonic_pixels:
             for p in hp:
                 values[p].append(
-                    fft_data[z, p[0] + center_pix[0], p[1] + center_pix[1]])
+                    fft_data[p[0] + center_pix[0], p[1] + center_pix[1]])
+    if verbose: print
     slopes = []
     K = []
     if display: fig = pylab.figure()
@@ -376,7 +455,7 @@ def get_shift_vector(
             values[p] -= slope * numpy.arange(len(values[p]))
             values[p] -= values[p].mean()
             if abs(values[p]).mean() < outlier_phase:
-                K.append(p * (-2. * numpy.pi / numpy.array(fft_data.shape[1:])))
+                K.append(p * (-2. * numpy.pi / numpy.array(fft_data.shape)))
                 slopes.append(slope)
             else:
                 if verbose: print "Ignoring outlier:", p
@@ -403,19 +482,21 @@ def get_shift_vector(
     return x_s
 
 def generate_lattice(
-    image_shape, lattice_vectors, center_pix='image', edge_buffer=2):
+    image_shape, lattice_vectors, center_pix='image', edge_buffer=2,
+    return_i_j=False):
 
     if center_pix == 'image':
         center_pix = numpy.array(image_shape) // 2
-    else: ##Express the center pixel in terms of the lattice vectors
+    else: ##Shift the center pixel by lattice vectors to the middle of the image
         center_pix = numpy.array(center_pix) - (numpy.array(image_shape) // 2)
         lattice_components = numpy.linalg.solve(
             numpy.vstack(lattice_vectors[:2]).T,
             center_pix)
-        lattice_components -= lattice_components // 1
-        center_pix = (lattice_vectors[0] * lattice_components[0] +
-                      lattice_vectors[1] * lattice_components[1] +
-                      numpy.array(image_shape)//2)
+        lattice_components_centered = numpy.mod(lattice_components, 1)
+        lattice_shift = lattice_components - lattice_components_centered
+        center_pix = (lattice_vectors[0] * lattice_components_centered[0] +
+                      lattice_vectors[1] * lattice_components_centered[1] +
+                      numpy.array(image_shape) // 2)
 
     num_vectors = int(#Probably an overestimate
         max(image_shape) / numpy.sqrt(lattice_vectors[0]**2).sum())
@@ -423,11 +504,16 @@ def generate_lattice(
     upper_bounds = (image_shape[0] - edge_buffer, image_shape[1] - edge_buffer)
     i, j = numpy.mgrid[-num_vectors:num_vectors, -num_vectors:num_vectors]
     i = i.reshape(i.size, 1)
-    j = j.reshape(i.size, 1)
+    j = j.reshape(j.size, 1)
     lp = i*lattice_vectors[0] + j*lattice_vectors[1] + center_pix
     valid = numpy.all(lower_bounds < lp, 1) * numpy.all(lp < upper_bounds, 1)
     lattice_points = list(lp[valid])
-    return lattice_points
+    if return_i_j:
+        return (lattice_points,
+                list(i[valid] - lattice_shift[0]),
+                list(j[valid] - lattice_shift[1]))
+    else:
+        return lattice_points
 
 def get_offset_vector(
     which_image, direct_lattice_vectors,
@@ -473,7 +559,7 @@ def show_lattice_overlay(
     s = 0
     while True:
         pylab.clf()
-        showMe = image_data[s, :, :]
+        showMe = numpy.array(image_data[s, :, :])
         dots = numpy.zeros(list(showMe.shape) + [4])
         lattice_points = generate_lattice(
             showMe.shape, direct_lattice_vectors,
@@ -523,9 +609,10 @@ def combine_lattices(
 def show_illuminated_points(
     direct_lattice_vectors, shift_vector, offset_vector='image',
     xPix=120, yPix=120, step_size=1, num_steps=200, verbose=True):
+    if verbose: print "\nShowing a portion of the illumination points..."
     spots = sum(combine_lattices(
         direct_lattice_vectors, shift_vector, offset_vector,
-        xPix, yPix, step_size, num_steps, verbose), [])
+        xPix, yPix, step_size, num_steps, verbose=verbose), [])
     fig=pylab.figure()
     pylab.plot([p[1] for p in spots], [p[0] for p in spots], '.')
     pylab.xticks(range(yPix))
@@ -555,7 +642,8 @@ def get_lattice_vectors(
     the basis vectors of the illumination lattice pattern."""
 
     image_data = load_image_data(filename, xPix=xPix, yPix=yPix, zPix=zPix)
-    fft_data, fft_abs = get_fft_abs(filename, image_data) #DC term at center
+    fft_data_folder, fft_abs, fft_avg = get_fft_abs(
+        filename, image_data) #DC term at center
     filtered_fft_abs = spike_filter(fft_abs)
 
     """Find candidate spikes in the Fourier domain"""
@@ -594,7 +682,7 @@ def get_lattice_vectors(
             numpy.cross(direct_lattice_vectors[0], direct_lattice_vectors[1])))
     """Use the Fourier lattice and the image data to measure shift and offset"""
     shift_vector = get_shift_vector(
-        corrected_basis_vectors, fft_data, filtered_fft_abs,
+        corrected_basis_vectors, fft_data_folder, filtered_fft_abs,
         num_harmonics=num_harmonics, outlier_phase=outlier_phase,
         verbose=verbose, display=display)
 
@@ -633,6 +721,12 @@ def get_lattice_vectors(
             image_data, direct_lattice_vectors,
             offset_vector, corrected_shift_vector)
 
+    #image_data is large. Figures hold references to it, stinking up the place.
+    if display:
+        pylab.close('all')
+        import gc
+        gc.collect() #Actually required, for once!
+
     return (corrected_basis_vectors, direct_lattice_vectors,
             corrected_shift_vector, offset_vector)
 
@@ -655,15 +749,17 @@ def find_interpolation_neighbors(
     new_grid_in_unit_cell = numpy.dot(
         V, numpy.mod(new_grid_lattice_coordinates, 1))
     if display:
-        print "Plotting new grid..."
-        fig = pylab.figure()
-        for i in range(2):
-            pylab.subplot(1, 2, i+1)
-            pylab.imshow(
-                new_grid_in_unit_cell.reshape(
-                    2, new_grid_x.size, new_grid_y.size)[i, :, :],
-                interpolation='nearest')
-        fig.show()
+        response = raw_input("Plot new grid? y/[n]:")
+        if response == 'y':
+            print "Plotting new grid..."
+            fig = pylab.figure()
+            for i in range(2):
+                pylab.subplot(1, 2, i+1)
+                pylab.imshow(
+                    new_grid_in_unit_cell.reshape(
+                        2, new_grid_x.size, new_grid_y.size)[i, :, :],
+                    interpolation='nearest')
+            fig.show()
     """Represent the illumination grid in terms of lattice coordinates"""
     scan_positions = shift_vector * numpy.arange(num_steps
                                                  ).reshape(num_steps, 1)
@@ -681,18 +777,20 @@ def find_interpolation_neighbors(
         scan_positions_in_padded_cell, axis=1).T)
     print "Done."
     if display:
-        print "Plotting triangles..."
-        fig = pylab.figure()
-        for p in scan_positions_in_padded_cell:
-            pylab.plot(p[1, :], p[0, :], '.')
-        pylab.axis('equal')
-        fig.show()
-        fig = pylab.figure()
-        for t in triangles.points[triangles.vertices]:
-            pylab.plot(list(t[:, 1]) + [t[0, 1]],
-                       list(t[:, 0]) + [t[0, 0]], 'r-')
-        pylab.axis('equal')
-        fig.show()
+        response = raw_input("Plot triangles? y/[n]:")
+        if response == 'y':
+            print "Plotting triangles..."
+            fig = pylab.figure()
+            for p in scan_positions_in_padded_cell:
+                pylab.plot(p[1, :], p[0, :], '.')
+            pylab.axis('equal')
+            fig.show()
+            fig = pylab.figure()
+            for t in triangles.points[triangles.vertices]:
+                pylab.plot(list(t[:, 1]) + [t[0, 1]],
+                           list(t[:, 0]) + [t[0, 0]], 'r-')
+            pylab.axis('equal')
+            fig.show()
     """Search the illumination grid for the new grid points"""
     print "Finding bounding triangles..."
     simplices = triangles.find_simplex(new_grid_in_unit_cell.T)
@@ -700,14 +798,43 @@ def find_interpolation_neighbors(
     if display:
         print "Plotting a few spots in their triangles..."
         fig = pylab.figure()
-        for i in range(100):
-            p = new_grid_in_unit_cell[:, i]
-            t = triangles.points[triangles.vertices[simplices[i]]]
-            pylab.plot(p[1], p[0], 'b.')
-            pylab.plot(list(t[:, 1]) + [t[0, 1]],
-                       list(t[:, 0]) + [t[0, 0]], 'r-')
-        pylab.axis('equal')
-        fig.show()
+        i_start = new_grid_x.size//2
+        j_start = new_grid_y.size//2
+        while True:
+            response = raw_input("New grid i (q to quit):")
+            if response == 'q':
+                break
+            elif response == '':
+                j_start += 1
+                if j_start >= new_grid_y.size:
+                    j_start -= new_grid_y.size
+                    i_start += 1
+                    if i_start >= new_grid_x.size:
+                        i_start -= new_grid_x.size
+            else:
+                try:
+                    i_start = int(response)
+                except ValueError:
+                    pass
+                response = raw_input("New grid j:")
+                try:
+                    j_start = int(response)
+                except ValueError:
+                    pass
+            start = i_start * new_grid_y.size + j_start
+            pylab.clf()
+            pylab.plot(scan_positions_in_padded_cell[0][1, :],
+                       scan_positions_in_padded_cell[0][0, :], '.')
+            for i in range(start, start + 5):
+                p = new_grid_in_unit_cell[:, i]
+                t = triangles.points[triangles.vertices[simplices[i]]]
+                pylab.plot(p[1], p[0], 'rx')
+                pylab.plot(list(t[:, 1]) + [t[0, 1]],
+                           list(t[:, 0]) + [t[0, 0]], 'r-')
+            pylab.axis('equal')
+            pylab.title("i, j: %i, %i"%(i_start, j_start))
+            fig.show()
+            fig.canvas.draw()
     """For each new grid point, in which three frames is it illuminated?"""
     neighboring_vertices = triangles.vertices[simplices]
     frames_with_neighboring_illumination = numpy.mod(neighboring_vertices,
@@ -723,18 +850,172 @@ def find_interpolation_neighbors(
             frames_with_neighboring_illumination.T.reshape(3, xs, ys),
             neighbor_absolute_positions.T.reshape(2, 3, xs, ys))
 
+def get_centered_subimage(
+    center_point, window_size, image, background='none'):
+    x, y = numpy.round(center_point).astype(int)
+    xSl = slice(max(x-window_size-1, 0), x+window_size+2)
+    ySl = slice(max(y-window_size-1, 0), y+window_size+2)
+    subimage = image[xSl, ySl].astype(float)
+    if background != 'none':
+        subimage -= background[xSl, ySl].astype(float)
+    interpolation.shift(
+        subimage, shift=(x, y)-center_point, output=subimage)
+    return subimage[1:-1, 1:-1]
+
+def spot_intensity_vs_galvo_position(
+    lake_filename, xPix, yPix, zPix, extent,
+    background_filename, background_zPix,
+    window_size=5, verbose=False, show_steps=False, display=False):
+    """Calibrate how the intensity of each spot varies with galvo
+    position, using a fluorescent lake dataset and a stack of
+    light-free background images."""
+
+    lake_basename = os.path.splitext(lake_filename)[0]
+    lake_intensities_name = lake_basename + '_spot_intensities.pkl'
+    background_basename = os.path.splitext(background_filename)[0]
+    background_name = background_basename + '_background_image.raw'
+    
+    if (os.path.exists(lake_intensities_name) and
+        os.path.exists(background_name)):
+        print "\nIllumination intensity calibration already calculated."
+        print "Loading", os.path.split(lake_intensities_name)[1]
+        intensities_vs_galvo_position = cPickle.load(
+            open(lake_intensities_name, 'rb'))
+        print "Loading", os.path.split(background_name)[1]
+        bg = numpy.fromfile(background_name, dtype=float).reshape(xPix, yPix)
+    else:
+        if verbose: print "\nCalculating illumination spot intensities..."
+        (fourier_lattice_vectors, direct_lattice_vectors,
+         shift_vector, offset_vector) = get_lattice_vectors(
+             filename=lake_filename, xPix=xPix, yPix=yPix, zPix=zPix,
+             extent=extent)
+
+        if verbose: print "Constructing background image..."
+        background_image_data = load_image_data(
+            background_filename, xPix, yPix, background_zPix)
+        bg = numpy.zeros((xPix, yPix), dtype=float)
+        for z in range(background_image_data.shape[0]):
+            bg += background_image_data[z, :, :]
+        bg *= 1.0 / background_image_data.shape[0]
+        del background_image_data
+        if verbose: print "Background image complete."
+
+        lake_image_data = load_image_data(lake_filename, xPix, yPix, zPix)
+        intensities_vs_galvo_position = {}
+        """A dict of dicts. Element [i, j][z] gives the intensity of the
+        i'th, j'th spot in the lattice, in frame z"""
+        if show_steps: fig = pylab.figure()
+        for z in range(lake_image_data.shape[0]):
+            im = lake_image_data[z, :, :]
+            if verbose:
+                sys.stdout.write("\rCalibration image %i"%(z))
+                sys.stdout.flush()
+            lattice_points, i_list, j_list = generate_lattice(
+                image_shape=(xPix, yPix),
+                lattice_vectors=direct_lattice_vectors,
+                center_pix=offset_vector + z*shift_vector,
+                edge_buffer=window_size+1,
+                return_i_j=True)
+            
+            for m, lp in enumerate(lattice_points):
+                i, j = int(i_list[m]), int(j_list[m])
+                intensity_history = intensities_vs_galvo_position.setdefault(
+                    (i, j), {}) #Get this spot's history
+                spot_image = get_centered_subimage(
+                    center_point=lp, window_size=window_size,
+                    image=im, background=bg)
+                intensity_history[z] = spot_image.sum()
+##                if (i, j) == (-1, -15):
+##                    fig = pylab.gcf()
+##                    show_steps = True
+                if show_steps:
+                    pylab.clf()
+                    pylab.imshow(
+                        spot_image, interpolation='nearest', cmap=pylab.cm.gray)
+                    pylab.title(
+                        "Spot %i, %i in frame %i\nCentered at %0.2f, %0.2f"%(
+                            i, j, z, lp[0], lp[1]))
+                    fig.show()
+                    fig.canvas.draw()
+                    response = raw_input()
+                    if response == 'q' or response == 'e' or response == 'x':
+                        show_steps = False
+        """Normalize the intensity values"""
+        num_entries = 0
+        total_sum = 0
+        for hist in intensities_vs_galvo_position.values():
+            for intensity in hist.values():
+                num_entries += 1
+                total_sum += intensity
+        inverse_avg = num_entries * 1.0 / total_sum
+        for hist in intensities_vs_galvo_position.values():
+            for k in hist.keys():
+                hist[k] *= inverse_avg
+        print "\nSaving", os.path.split(lake_intensities_name)[1]
+        cPickle.dump(intensities_vs_galvo_position,
+                     open(lake_intensities_name, 'wb'), protocol=2)
+        print "Saving", os.path.split(background_name)[1]
+        bg.tofile(background_name)
+    if display:
+        fig=pylab.figure()
+        num_lines = 0
+        for (i, j), spot_hist in intensities_vs_galvo_position.items()[:10]:
+            num_lines += 1
+            sh = spot_hist.items()
+            pylab.plot([frame_num for frame_num, junk in sh],
+                       [intensity for junk, intensity in sh],
+                       ('-', '-.')[num_lines > 5],
+                       label=repr((i, j)))
+        pylab.legend()
+        fig.show()
+    return intensities_vs_galvo_position, bg #bg is short for 'background'
+
+
 def display_neighboring_frames(
     data_source, xPix, yPix, zPix,
-    new_grid, frames_with_neighboring_illumination, neighbor_absolute_positions
-    ):
+    new_grid, frames_with_neighboring_illumination, neighbor_absolute_positions,
+    lattice_vectors, shift_vector, offset_vector,
+    intensities_vs_galvo_position, background_image,
+    mode='random'):
     print "Displaying neighboring frames..."
     """Display the neighboring frames"""
     image_data = load_image_data(data_source, xPix, yPix, zPix)
     from random import randint
     fig = pylab.figure()
+    i = new_grid.shape[1]//2
+    j = new_grid.shape[2]//2
     while True:
-        i = randint(0, new_grid.shape[1] - 1)
-        j = randint(0, new_grid.shape[2] - 1)
+        if mode == 'random':
+            i = randint(0, new_grid.shape[1] - 1)
+            j = randint(0, new_grid.shape[2] - 1)
+            raw_input('Hit enter to continue...\n')
+        elif mode == 'scan':
+            response = raw_input("Next frame, i [scan]:")
+            if response == '':
+                j += 1
+                if j >= new_grid.shape[2]:
+                    j -= new_grid.shape[2]
+                    i += 1
+                    if i >= new_grid.shape[1]:
+                        i -= new_grid.shape[1]
+                print "Moving to i, j =", i, j
+            elif response == 'q' or response == 'e' or response == 'x':
+                break
+            else:
+                try:
+                    i = int(response)
+                except ValueError:
+                    pass
+                response = raw_input("Next frame, j:")
+                try:
+                    j = int(response)
+                except ValueError:
+                    pass
+                if i > new_grid.shape[1]: i = new_grid.shape[1] - 1
+                if i < 0: i = 0
+                if j > new_grid.shape[2]: j = new_grid.shape[2] - 1
+                if j < 0: j = 0
+            
         p = new_grid[:, i, j]
         n = frames_with_neighboring_illumination[:, i, j]
         n_pos = neighbor_absolute_positions[:, :, i, j]
@@ -747,19 +1028,41 @@ def display_neighboring_frames(
             p[0], p[1]))
         x, y = numpy.round(p)
         print "x, y:", x, y
-        footprint = 20
-        for i, f in enumerate(n):
-            pylab.subplot(2, 2, i+1)
-            showMe = numpy.array(image_data[f,
-                                            max(x-footprint, 0):x+footprint+1,
-                                            max(y-footprint, 0):y+footprint+1])
-            pylab.imshow(showMe, cmap=pylab.cm.gray, interpolation='nearest')
-            if showMe.shape == (2*footprint+1, 2*footprint+1):
-                central_dot = numpy.zeros(showMe.shape + (4,))
-                central_dot[footprint, footprint, 0::3] = 1
-                pylab.imshow(central_dot, interpolation='nearest')
-            pylab.title("Frame %i"%(f))
-        pylab.subplot(2, 2, 4)
+        footprint = 5
+        colorImage = numpy.zeros((2*footprint+1, 2*footprint+1, 3)) + 1e-12
+        for c, f in enumerate(n):
+            lattice_indices = numpy.linalg.solve(
+                numpy.vstack(lattice_vectors[:2]).T,
+                n_pos[:, c] - offset_vector - f*shift_vector)
+            print "Lattice indices:", lattice_indices
+##            print  intensities_vs_galvo_position.get((-1, -13), {}).get(129, numpy.inf)
+##            print (int(round(lattice_indices[0])), int(round(lattice_indices[1])))
+##            print f
+            calibration_weight = intensities_vs_galvo_position.get(
+                (int(round(lattice_indices[0])), int(round(lattice_indices[1]))),
+                {}).get(f, numpy.inf)
+            print "Calibration weight:",
+            print "%0.2f"%(calibration_weight)
+            showMe = get_centered_subimage(
+                center_point=n_pos[:, c], window_size=footprint,
+                image=image_data[f, :, :], background=background_image)
+            print "Frame", "%03i"%(f), "has average value:",
+            print "%0.2f"%(showMe.mean()), "above background"
+            print "Normalized value:", "%0.2f"%(
+                showMe.mean() * 1.0 / calibration_weight)
+            if showMe.shape == colorImage.shape[:2] and calibration_weight > 0:
+                colorImage[:, :, c] = showMe * 1.0 / calibration_weight
+        if colorImage.max() > colorImage.min():
+            colorImage -= colorImage.min()
+            colorImage *= 1.0 / colorImage.max()
+        pylab.subplot(1, 2, 1)
+        pylab.title("Frames %i, %i, %i"%(n[0], n[1], n[2]))
+        pylab.imshow(colorImage, interpolation='nearest')
+        if showMe.shape == (2*footprint+1, 2*footprint+1):
+            central_dot = numpy.zeros(showMe.shape + (4,))
+            central_dot[footprint, footprint, 0::3] = 1
+            pylab.imshow(central_dot, interpolation='nearest')
+        pylab.subplot(1, 2, 2)
         pylab.plot(list(n_pos[1, :]) + [n_pos[1, 0]],
                    list(n_pos[0, :]) + [n_pos[0, 0]], 'b.-')
         pylab.plot(p[1], p[0], 'rx', markersize=20)
@@ -769,5 +1072,33 @@ def display_neighboring_frames(
         ax.set_ylim(ax.get_ylim()[::-1])
         fig.show()
         fig.canvas.draw()
-        raw_input()
     return None
+
+##def xy_to_lattice_index(
+##    x, y, frame_number,
+##    lattice_vectors, offset_vector, shift_vector,
+##    tolerance=0.01):
+##
+##    lattice_position = numpy.linalg.solve(
+##        numpy.vstack(lattice_vectors[:2]).T,
+##        numpy.array(x, y) -
+##        offset_vector - frame_number*shift_vector)
+##
+##    lattice_indices = lattice_position.astype(int)
+##    if ((lattice_indices - lattice_position)**2).sum() > tolerance:
+##        print "Lattice indices:", lattice_indices
+##        print "Lattice position:", lattice_position
+##        raise UserWarning(
+##            "Conversion to lattice index exceeded error tolerance")
+##    return tuple(lattice_indices)
+##
+##def lattice_index_to_xy(
+##    i, j, frame_number,
+##    lattice_vectors, offset_vector, shift_vector):
+##
+##    return (i*lattice_vectors[0] + j*lattice_vectors[1] +
+##            offset_vector +
+##            frame_number*shift_vector)
+
+    
+    

@@ -215,8 +215,11 @@ def get_lattice_vectors(
                      repr(corrected_shift_vector) + "\r\n\r\n")
         params.write("Offset vector:" +
                      repr(offset_vector) + "\r\n\r\n")
-        params.write("Final offset vector:" +
-                     repr(final_offset_vector) + "\r\n\r\n")
+        try:
+            params.write("Final offset vector:" +
+                         repr(final_offset_vector) + "\r\n\r\n")
+        except UnboundLocalError:
+            params.write("Final offset vector: Not recorded\r\n\r\n")            
         if lake is not None:
             params.write("Lake filename:" + lake + "\r\n\r\n")
         params.close()
@@ -264,9 +267,15 @@ def enderlein_image_parallel(
         print "\nEnderlein image already calculated."
         print "Loading", os.path.split(enderlein_image_name)[1]
         images = {}
-        images['enderlein_image'] = numpy.fromfile(
-            enderlein_image_name, dtype=float
-            ).reshape(new_grid_xrange[2], new_grid_yrange[2])
+        try:
+            images['enderlein_image'] = numpy.fromfile(
+                enderlein_image_name, dtype=float
+                ).reshape(new_grid_xrange[2], new_grid_yrange[2])
+        except ValueError:
+            print "\n\nWARNING: the data file:"
+            print enderlein_image_name
+            print "may not be the size it was expected to be.\n\n"
+            raise
     else:
         start_time = time.clock()
         if num_processes == 1:
@@ -374,8 +383,14 @@ def enderlein_image_subprocess(
     intensities_vs_galvo_position = cPickle.load(
         open(lake_intensities_name, 'rb'))
     background_directory_name = os.path.dirname(background_name)
-    background_frame = numpy.fromfile(
-        background_name).reshape(xPix, yPix).astype(float)
+    try:
+        background_frame = numpy.fromfile(
+            background_name).reshape(xPix, yPix).astype(float)
+    except ValueError:
+        print "\n\nWARNING: the data file:"
+        print background_name
+        print "may not be the size it was expected to be.\n\n"
+        raise
     try:
         hot_pixels = numpy.fromfile(
             os.path.join(background_directory_name, 'hot_pixels.txt'), sep=', ')
@@ -579,9 +594,15 @@ def load_image_slice(filename, xPix, yPix, preframes=0, which_slice=0):
     bytes_per_pixel = 2
     data_file = open(filename, 'rb')
     data_file.seek((which_slice + preframes) * xPix*yPix*bytes_per_pixel)
-    return numpy.fromfile(
-        data_file, dtype=numpy.uint16, count=xPix*yPix
-        ).reshape(xPix, yPix)
+    try:
+        return numpy.fromfile(
+            data_file, dtype=numpy.uint16, count=xPix*yPix
+            ).reshape(xPix, yPix)
+    except ValueError:
+        print "\n\nWARNING: the data file:"
+        print data_file
+        print "may not be the size it was expected to be.\n\n"
+        raise
 
 def load_fft_slice(fft_data_folder, xPix, yPix, which_slice=0):
     bytes_per_pixel = 16
@@ -1246,7 +1267,14 @@ def spot_intensity_vs_galvo_position(
         intensities_vs_galvo_position = cPickle.load(
             open(lake_intensities_name, 'rb'))
         print "Loading", os.path.split(background_name)[1]
-        bg = numpy.fromfile(background_name, dtype=float).reshape(xPix, yPix)
+        try:
+            bg = numpy.fromfile(background_name, dtype=float
+                                ).reshape(xPix, yPix)
+        except ValueError:
+            print "\n\nWARNING: the data file:"
+            print background_name
+            print "may not be the size it was expected to be.\n\n"
+            raise
     else:
         print "\nCalculating illumination spot intensities..."
         print "Constructing background image..."
@@ -1406,13 +1434,26 @@ def join_enderlein_images(
         basename = os.path.splitext(d)[0]
         enderlein_image_name = basename + '_enderlein_image.raw'
         widefield_image_name = basename + '_widefield.raw'
-        enderlein_stack[i, :, :] = numpy.fromfile(
-            enderlein_image_name, dtype=numpy.float).reshape(
-            new_grid_xrange[2], new_grid_yrange[2])
-        if join_widefield_images:
-            widefield_stack[i, :, :] = numpy.fromfile(
-                widefield_image_name, dtype=numpy.float).reshape(
+        try:
+            enderlein_stack[i, :, :] = numpy.fromfile(
+                enderlein_image_name, dtype=numpy.float).reshape(
                 new_grid_xrange[2], new_grid_yrange[2])
+        except ValueError:
+            print "\n\nWARNING: the data file:"
+            print enderlein_image_name
+            print "may not be the size it was expected to be.\n\n"
+            raise
+        if join_widefield_images:
+            try:
+                widefield_stack[i, :, :] = numpy.fromfile(
+                    widefield_image_name, dtype=numpy.float).reshape(
+                    new_grid_xrange[2], new_grid_yrange[2])
+            except ValueError:
+                print "\n\nWARNING: the data file:"
+                print widefield_image_name
+                print "may not be the size it was expected to be.\n\n"
+                raise
+
     stack_basename = os.path.commonprefix(data_filenames_list).rstrip(
         '0123456789')
     print "\nStack basename:", stack_basename

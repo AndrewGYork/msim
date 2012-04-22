@@ -11,116 +11,17 @@ scan_type = 'visitech'
 scan_dimensions = None
 
 """Menagerie of data sources. Uncomment one of these lines:"""
-##data_filename, xPix, yPix, zPix = 'QDots.raw', 512, 512, 201
-##data_filename, xPix, yPix, zPix = 'Beads.raw', 512, 512, 201
-##data_filename, xPix, yPix, zPix = 'big_QDots.raw', 1024, 1344, 201
-##data_filename, xPix, yPix, zPix = 'big_Beads.raw', 1024, 1344, 201
-##data_filename, xPix, yPix, zPix = 'big_2_Beads.raw', 1024, 1344, 201
-##data_filename, xPix, yPix, zPix = 'lake_1000_positions.raw', 1024, 1344, 1000
-##data_filename, xPix, yPix, zPix = 'beads_1000_positions.raw', 1024, 1344, 1000
-##data_filename, xPix, yPix, zPix = 'utubules_1000_1.raw', 1024, 1344, 999
-##data_filename, xPix, yPix, zPix = 'utubules_1000_2.raw', 1024, 1344, 999
-##data_filename, xPix, yPix, zPix, steps, extent = 'Lake_1.raw', 1024, 1344, 200, 185, 9
-##data_filename, xPix, yPix, zPix, steps = 'Lake_2.raw', 1024, 1344, 200, 186
-##data_filename, xPix, yPix, zPix, steps = 'Lake_3.raw', 1024, 1344, 200, 187
-##data_filename, xPix, yPix, zPix, steps = 'Lake_0p89uW.raw', 1024, 1344, 200, 188
-##data_filename, xPix, yPix, zPix, steps, extent = 'Lake_1p40uW.raw', 1024, 1344, 200, 188, 9
-##data_filename, xPix, yPix, zPix, steps, extent = 'Lake_1p96uW.raw', 1024, 1344, 200, 188, 9
-##data_filename, xPix, yPix, zPix, steps = 'utubules_z0p00.raw', 1024, 1344, 200, 188
-##data_filename, xPix, yPix, zPix, steps, extent = 'fake_lake.raw', 512, 512, 200, 185, 8
-##data_filename, xPix, yPix, zPix, steps, extent = 'fake_beads.raw', 512, 512, 200, 185, 8
-##data_filename, xPix, yPix, zPix, steps, extent = 'fake_tubules.raw', 512, 512, 200, 185, 8
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'Tubules_sapun_1.raw',
-##    'Lake_sapun_2.raw',
-##    1024, 1344, 200, 188, 9)
-##data_filename, xPix, yPix, zPix, steps, extent = 'Tubules_sapun_2.raw', 1024, 1344, 200, 188, 9
-##data_filename, xPix, yPix, zPix, steps, extent = 'Lake_sapun_2.raw', 1024, 1344, 200, 185, 9
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_lake_scale_0p50_sigma_1p00.raw',
-##    'fake_lake_scale_0p50_sigma_1p00.raw',
-##    512, 512, 200, 185, 16)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_tubules_scale_0p50_sigma_1p00.raw',
-##    'fake_lake_scale_0p50_sigma_1p00.raw',
-##    512, 512, 200, 185, 16)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_lake_scale_0p50_sigma_2p00.raw',
-##    'fake_lake_scale_0p50_sigma_2p00.raw',
-##    512, 512, 200, 185, 16)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent, num_harmonics = (
-##    'fake_tubules_scale_0p50_sigma_2p00.raw',
-##    'fake_lake_scale_0p50_sigma_2p00.raw',
-##    512, 512, 200, 185, 16, 2)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent, num_harmonics = (
-##    'fake_beads_scale_0p50_sigma_2p00.raw',
-##    'fake_lake_scale_0p50_sigma_2p00.raw',
-##    512, 512, 200, 185, 16, 2)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_lake_scale_1p00_sigma_2p00.raw',
-##    'fake_lake_scale_1p00_sigma_2p00.raw',
-##    512, 512, 200, 185, 8)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_tubules_scale_1p00_sigma_2p00.raw',
-##    'fake_lake_scale_1p00_sigma_2p00.raw',
-##    512, 512, 200, 185, 8)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_lake_scale_1p00_sigma_1p00.raw',
-##    'fake_lake_scale_1p00_sigma_1p00.raw',
-##    512, 512, 200, 185, 8)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_tubules_scale_1p00_sigma_1p00.raw',
-##    'fake_lake_scale_1p00_sigma_1p00.raw',
-##    512, 512, 200, 185, 8)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_lake_scale_1p00_sigma_3p00.raw',
-##    'fake_lake_scale_1p00_sigma_3p00.raw',
-##    512, 512, 200, 185, 8)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_tubules_scale_1p00_sigma_3p00.raw',
-##    'fake_lake_scale_1p00_sigma_3p00.raw',
-##    512, 512, 200, 185, 8)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_lake_scale_0p66_sigma_2p00.raw',
-##    'fake_lake_scale_0p66_sigma_2p00.raw',
-##    512, 512, 200, 185, 12)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent, num_harmonics = (
-##    'fake_beads_scale_0p66_sigma_2p00.raw',
-##    'fake_lake_scale_0p66_sigma_2p00.raw',
-##    512, 512, 200, 185, 12, 2)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent, num_harmonics = (
-##    'fake_tubules_scale_0p66_sigma_2p00.raw',
-##    'fake_lake_scale_0p66_sigma_2p00.raw',
-##    512, 512, 200, 185, 12, 2)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_lake_scale_0p66_sigma_2p50.raw',
-##    'fake_lake_scale_0p66_sigma_2p50.raw',
-##    512, 512, 200, 185, 12)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent, num_harmonics = (
-##    'fake_tubules_scale_0p66_sigma_2p50.raw',
-##    'fake_lake_scale_0p66_sigma_2p50.raw',
-##    512, 512, 200, 185, 12, 2)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent = (
-##    'fake_lake_scale_0p66_sigma_3p00.raw',
-##    'fake_lake_scale_0p66_sigma_3p00.raw',
-##    512, 512, 200, 185, 12)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent, num_harmonics = (
-##    'fake_tubules_scale_0p66_sigma_3p00.raw',
-##    'fake_lake_scale_0p66_sigma_3p00.raw',
-##    512, 512, 200, 185, 12, 2)
-##data_filename, lake_filename, xPix, yPix, zPix, steps, extent, scan_type, scan_dimensions = (
-##    'fake_lake_hd_21_ss_3_sigma_2p00.raw',
-##    'fake_lake_hd_21_ss_3_sigma_2p00.raw',
-##    512, 512, 168, 168, 8, 'dmd', (14, 12))
 data_filename, lake_filename, xPix, yPix, zPix, steps, extent, scan_type, scan_dimensions = (
-    'fake_tubules_hd_21_ss_3_sigma_2p00.raw',
-    'fake_lake_hd_21_ss_3_sigma_2p00.raw',
-    512, 512, 168, 168, 8, 'dmd', (14, 12))
+    '07_4_pix_spots_1_pix_shifts_tubules.raw',
+    '02_4_pix_spots_1_pix_steps.raw',
+    1064, 1120, 340, 340, 20, 'dmd', (20, 17))
 
-background_filename, background_zPix = 'fake_background.raw', 200
-##background_filename, background_zPix = 'Lake_0p00uW.raw', 200
 
-data_dir = 'data_2'
+background_filename, background_zPix = 'background.raw', 340
+
+data_dir = '2011_09_27'
+
+##Don't edit below here
 data_filename = os.path.join(os.getcwd(), data_dir, data_filename)
 lake_filename = os.path.join(os.getcwd(), data_dir, lake_filename)
 background_filename = os.path.join(os.getcwd(), data_dir, background_filename)
@@ -306,6 +207,9 @@ else:
                     show_steps = False
         enderlein_image += this_frames_image
         enderlein_normalization += this_frames_normalization
+        ###Temporary hack:
+        enderlein_normalization.fill(1)
+        this_frames_normalization.fill(1)
         if intermediate_data:
             cumulative_sum[z, :, :] = (
                 enderlein_image * 1. / enderlein_normalization)

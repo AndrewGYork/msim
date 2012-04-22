@@ -1,3 +1,4 @@
+
 import os, sys, cPickle, pprint, numpy, pylab
 from itertools import product
 from scipy.ndimage import gaussian_filter, interpolation
@@ -116,8 +117,8 @@ def get_lattice_vectors(
             print "Lattice vector triangle sum:",
             print sum(direct_lattice_vectors)
             print "Unit cell area: (%0.2f)^2 square pixels"%(
-                numpy.sqrt(numpy.cross(direct_lattice_vectors[0],
-                                       direct_lattice_vectors[1])))
+                numpy.sqrt(numpy.abs(numpy.cross(direct_lattice_vectors[0],
+                                                 direct_lattice_vectors[1]))))
         """Use the Fourier lattice and the image data to measure
         shift and offset"""
         offset_vector = get_offset_vector(
@@ -169,8 +170,8 @@ def get_lattice_vectors(
 def load_image_data(filename, xPix=512, yPix=512, zPix=201):
     """Load the 16-bit raw data from the Visitech Infinity"""
     bytes_per_pixel = 2
-    return numpy.fromfile(
-        filename, dtype=numpy.uint16
+    return numpy.memmap(
+        filename, dtype=numpy.uint16, mode='r'
         ).reshape(zPix, xPix, yPix) #FIRST dimension is image number
 
 def load_image_slice(filename, xPix, yPix, which_slice=0):

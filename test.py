@@ -25,8 +25,8 @@ num_harmonics = 3
 ##data_filename, xPix, yPix, zPix, steps = 'utubules_z0p00.raw', 1024, 1344, 200, 188
 ##data_filename, xPix, yPix, zPix, steps, extent = 'fake_lake.raw', 512, 512, 200, 185, 8
 ##data_filename, xPix, yPix, zPix, steps, extent = 'fake_beads.raw', 512, 512, 200, 185, 8
-##data_filename, xPix, yPix, zPix, steps, extent = 'fake_tubules.raw', 512, 512, 200, 185, 8
-data_filename, xPix, yPix, zPix, steps, extent = 'fake_tubules_sigma_1p00.raw', 512, 512, 200, 185, 8
+data_filename, xPix, yPix, zPix, steps, extent = 'fake_tubules.raw', 512, 512, 200, 185, 8
+##data_filename, xPix, yPix, zPix, steps, extent = 'fake_tubules_sigma_1p00.raw', 512, 512, 200, 185, 8
 ##data_filename, xPix, yPix, zPix, steps, extent = 'Tubules_sapun_1.raw', 1024, 1344, 200, 188, 9
 ##data_filename, xPix, yPix, zPix, steps, extent = 'Tubules_sapun_2.raw', 1024, 1344, 200, 188, 9
 
@@ -113,7 +113,7 @@ if (os.path.exists(enderlein_format_name) and
     print "Loading", os.path.split(enderlein_format_name)[1]
     enderlein_format = numpy.memmap(
         enderlein_format_name, dtype=float, mode='r',
-        shape=new_grid.shape[1:] + (2*window_footprint+1, 2*window_footprint+1))
+        shape=(2*window_footprint+1, 2*window_footprint+1) + new_grid.shape[1:])
     print "Loading", os.path.split(enderlein_image_name)[1]
     simple_image = numpy.fromfile(
         enderlein_image_name, dtype=float).reshape(xPix, yPix)
@@ -125,7 +125,7 @@ else:
         ).reshape(num_steps, xPix, yPix)
     enderlein_format = numpy.memmap(
         enderlein_format_name, dtype=float, mode='w+',
-        shape=new_grid.shape[1:] + (2*window_footprint+1, 2*window_footprint+1))
+        shape=(2*window_footprint+1, 2*window_footprint+1) + new_grid.shape[1:])
     print "Done."
     for i in range(new_grid.shape[1]): #Loop over the new array one at a time
         sys.stdout.write("\rRow %i"%(i))
@@ -166,21 +166,21 @@ else:
 ##                                                 2*window_footprint+1):
 ##                    neighbor_images[-1] = numpy.zeros((2*window_footprint+1,
 ##                                                       2*window_footprint+1))
-            enderlein_format[i, j, :, :
+            enderlein_format[:, :, i, j
                              ] = find_lattice.three_point_weighted_average(
                                  position=position,
                                  corners=neighbor_positions.T,
                                  values=neighbor_images)    
 
     enderlein_format.flush()
-    simple_image = numpy.zeros(enderlein_format.shape[:2])
+    simple_image = numpy.zeros(enderlein_format.shape[2:])
     print
     print "Constructing simple image..."
     for i in range(simple_image.shape[0]):
         sys.stdout.write("\rRow %i"%(i))
         sys.stdout.flush()
         for j in range(simple_image.shape[1]):
-            simple_image[i, j] = enderlein_format[i, j, :, :].sum()
+            simple_image[i, j] = enderlein_format[:, :, i, j].sum()
     simple_image.tofile(enderlein_image_name)
 fig = pylab.figure()
 pylab.imshow(simple_image,

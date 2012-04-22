@@ -191,6 +191,13 @@ def spike_filter(fft_abs):
 ##    fig.canvas.draw()
 ##    raw_input('Hit enter...')
 ##    pylab.clf()
+    f = gaussian_filter(f, sigma=(1.5))
+##    pylab.imshow(f, cmap=pylab.cm.gray, interpolation='nearest')
+##    pylab.title('Resmoothed')
+##    fig.show()
+##    fig.canvas.draw()
+##    raw_input('Hit enter...')
+##    pylab.clf()
     f = f * (f > 0)
 ##    pylab.imshow(f, cmap=pylab.cm.gray, interpolation='nearest')
 ##    pylab.title('Negative truncated')
@@ -314,7 +321,7 @@ def get_precise_basis(coords, basis_vectors, fft_abs, tolerance, verbose=False):
                     if verbose:
                         print "Found lattice point:", c
                         print "Estimated position:", true_max
-                        print "Lattic index:", key
+                        print "Lattice index:", key
                     spike_indices.append(key)
                     spike_locations.append(true_max)
                     break

@@ -40,9 +40,8 @@ def generate_lattice(
 
 num_shifts = 200
 image_pix = (512, 512)
-illumination_psf_sigma = 1
-emission_psf_sigma = 1
-counts_per_molecule = 1e7
+illumination_psf_sigma = 2.
+emission_psf_sigma = 2.
 upsample = 5
 padding = 20
 emission_intensity = numpy.memmap(
@@ -78,15 +77,18 @@ print "Generating test object..."
 numpy.random.seed(0)
 ##"""Uniform object:"""
 ##upsampled_object = numpy.ones_like(upsampled_illumination)
+##counts_per_molecule = 1e5
 """Randomly placed point emitters:"""
 upsampled_object = numpy.ones_like(upsampled_illumination)
 upsampled_object *= (
     numpy.random.random(size=upsampled_object.shape) > (1 - 1e-4))
+counts_per_molecule = 1e8
 ##"""Thin lines: (only works for 512x512, upsample=5)"""
 ##upsampled_object = numpy.zeros_like(upsampled_illumination)
 ##upsampled_object[upsample*padding:-upsample*padding,
-##                 upsample*padding:-upsample*padding] =  numpy.fromfile(
+##                 upsample*padding:-upsample*padding] = numpy.fromfile(
 ##                     'Lines.raw', dtype=numpy.uint16).reshape(512*5, 512*5)
+##counts_per_molecule = 5e1
 print "Plotting blurred version of the test object..."
 showMe = gaussian_filter(upsampled_object, sigma=upsample*emission_psf_sigma)
 fig = pylab.figure()
@@ -97,7 +99,7 @@ fig.canvas.draw()
 raw_input("Hit enter to continue...")
 pylab.close(fig)
 
-scale = 1.
+scale = 2.0 / 3.0
 lattice_vectors=(scale * numpy.array((41.1939, 0.81015)),
                  scale * numpy.array((-18.174985, 37.02572)),
                  scale * numpy.array((-23.01898, -37.835879)))
@@ -145,7 +147,7 @@ for sh in range(num_shifts):
 
 
 """
-Add background and noise to the grid
+Add noise to the grid
 """
 print "Adding Poisson noise"
 photoelectrons = numpy.memmap(
@@ -153,7 +155,7 @@ photoelectrons = numpy.memmap(
     shape=(num_shifts, image_pix[0], image_pix[1]))
 print
 for p in range(photoelectrons.shape[0]):
-    sys.stdout.write("\rAdding Poisson noise to background slice %i"%(p))
+    sys.stdout.write("\rAdding Poisson noise to slice %i"%(p))
     sys.stdout.flush()
     photoelectrons[p, :, :] = poisson(
         emission_intensity[p, padding:-padding, padding:-padding]

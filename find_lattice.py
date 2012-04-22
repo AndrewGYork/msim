@@ -1,16 +1,7 @@
-import os, sys, numpy, pylab, time
+import os, sys, numpy, pylab
 from itertools import product, combinations
-from scipy.ndimage import gaussian_laplace, gaussian_filter
-from scipy.signal import resample
-
-if os.name == 'posix':
-    timer = time.time
-elif os.name == 'nt':
-    timer = time.clock
-
-def subpixel_shift(im, shift):
-    ###DUMMY FUNCTION. FIXME!
-    return im
+from scipy.ndimage import gaussian_filter
+from scipy.spatial import Delaunay
 
 def load_image_data(filename, xPix=512, yPix=512, zPix=201):
     """Load the 16-bit raw data from the Visitech Infinity"""
@@ -114,17 +105,25 @@ def three_point_weighted_average(position, corners, values):
     average of the values for some interior position. Equivalent to
     interpolating with a plane."""
     x, y = position
+##    print
+##    print "x, y:", x, y
     ((x1, y1), (x2, y2), (x3, y3)) = corners
+##    print "Corners:"
+##    print x1, y1
+##    print x2, y2
+##    print x3, y3
     (z1, z2, z3) = values
+##    print "Values:", z1.shape, z2.shape, z3.shape
     denom = y1*(x3 - x2) + y2*(x1 - x3) + y3*(x2 - x1)
-    print denom
-    w1 = (y3 - y2)*x + (x2 - x3)*y + x3*y2 + x2*y3
-    print w1
-    w2 = (y1 - y3)*x + (x3 - x1)*y + x1*x3 - x3*y1
-    print w2
+    w1 = (y3 - y2)*x + (x2 - x3)*y + x3*y2 - x2*y3
+    w2 = (y1 - y3)*x + (x3 - x1)*y + x1*y3 - x3*y1
     w3 = (y2 - y1)*x + (x1 - x2)*y + x2*y1 - x1*y2
-    print w3
-    return (w1*z1 + w2*z2 + w3*z3) * 1.0 / denom
+##    print "Weights:"
+##    print w1 * 1.0 / denom
+##    print w2 * 1.0 / denom
+##    print w3 * 1.0 / denom
+##    raw_input()
+    return (w1*z1 + w2*z2 + w3*z3) * -1.0 / denom
 
 def spike_filter(fft_abs):
     f = gaussian_filter(numpy.log(1 + fft_abs), sigma=0.5)
@@ -645,7 +644,6 @@ def find_interpolation_neighbors(
     grid that Enderlein's trick expects. For each point on the desired
     grid, this function finds three neighboring scattered scan points
     suitable for interpolating the value at the desired point."""
-    from scipy.spatial import Delaunay
     """Represent the new grid in terms of lattice coordinates"""
     new_grid = numpy.array(numpy.meshgrid(#Arguments backwards from expected!
         new_grid_y, new_grid_x))[::-1, :, :].reshape(
@@ -720,183 +718,56 @@ def find_interpolation_neighbors(
     neighbor_absolute_positions = (
         neighbor_relative_positions +
         new_grid.T.reshape(new_grid.shape[1], 1, 2))
-    return (new_grid,
-            frames_with_neighboring_illumination,
-            neighbor_absolute_positions)
+    xs, ys = new_grid_x.size, new_grid_y.size
+    return (new_grid.reshape(2, xs, ys),
+            frames_with_neighboring_illumination.T.reshape(3, xs, ys),
+            neighbor_absolute_positions.T.reshape(2, 3, xs, ys))
 
-
-##def find_closest_illumination(
-##    data_source, direct_lattice_vectors, shift_vector, offset_vector,
-##    xPix, yPix, zPix, step_size=1, num_steps=184,
-##    new_grid_x='pixels', new_grid_y='pixels', window_size=8, scan_footprint=5,
-##    verbose=True, display=False):
-##
-##    if verbose: print "\nFinding actual scan points near desired scan points..."
-##
-##    if new_grid_x == 'pixels':
-##        new_grid_x = numpy.arange(xPix)
-##    if new_grid_y == 'pixels':
-##        new_grid_y = numpy.arange(yPix)
-##
-##    """Check for previous computation"""
-##    spots = combine_lattices(
-##        direct_lattice_vectors, shift_vector, offset_vector, xPix, yPix,
-##        step_size=step_size, num_steps=num_steps, verbose=verbose,
-##        edge_buffer=window_size+2)
-##    num_spots = sum([len(fr) for fr in spots])
-##    basename = os.path.splitext(data_source)[0]
-##    spot_images_name = basename + '_spot_images.raw'
-##    neighbors_name = basename + '_neighbors.npy'
-##    if os.path.exists(spot_images_name) and os.path.exists(neighbors_name):
-##        response = raw_input(
-##            "Spot images and neighbors already calculated. Recalculate? y/[n]:")
-##        if response != 'y':
-##            print "Loading", os.path.split(spot_images_name)[1]
-##            spot_images = numpy.memmap(
-##                spot_images_name, dtype=float, mode='r'
-##                ).reshape(num_spots, 2*window_size+1, 2*window_size+1)
-##            print "Loading", os.path.split(neighbors_name)[1]
-##            neighbors = numpy.load(neighbors_name)
-##            if display:
-##                display_neighbors_and_spots(neighbors, spot_images,
-##                                            new_grid_x, new_grid_y)
-##            return neighbors, spot_images
-##    """Set up the files we need"""
-##    image_data = load_image_data(data_source, xPix, yPix, zPix)
-##    spot_images = numpy.memmap(
-##        spot_images_name, dtype=float, mode='w+',
-##        shape=(num_spots, 2*window_size+1, 2*window_size+1))
-##    neighbors = numpy.zeros(
-##        (new_grid_x.size, new_grid_y.size, 10),
-##        dtype=numpy.dtype([('distance_squared', float), ('which_spot', int),
-##                           ('x', float), ('y', float),]))
-##    neighbors['distance_squared'].fill(scan_footprint**2 + 1)
-##    neighbors['which_spot'].fill(-1)
-##    if verbose: print "Slicing out subregions..."
-##    which_spot = -1
-##    start = timer()
-####    fig=pylab.figure()
-##    for image_num, fr in enumerate(spots):
-##        im = image_data[image_num, :, :]
-##        for s in fr:
-##            which_spot += 1
-##            if which_spot%1000 == 0:
-##                speed = which_spot * 1.0 / (timer() - start)
-##                sys.stdout.write(
-##                    '\rSlicing image #%04i, spot %05i, %0.2f spots/second'%(
-##                        image_num+1, which_spot, speed))
-##                sys.stdout.flush()
-##            """Extract a sub-image surrounding the illumination:"""
-##            x, y = numpy.round(s)
-##            spot_images[which_spot, :, :] = subpixel_shift(
-##                im[x-window_size:x+window_size+1,
-##                   y-window_size:y+window_size+1],
-##                shift=(x-s[0], y-s[1]))
-##            """For each actual scan position, find the closest desired
-##            scan position, and record how close the actual scan
-##            position came to nearby desired scan positions"""
-##            i = numpy.searchsorted(new_grid_x, s[0]) - 1
-##            j = numpy.searchsorted(new_grid_y, s[1]) - 1
-##            iSl = slice(i-scan_footprint, i+scan_footprint+1)
-##            jSl = slice(j-scan_footprint, j+scan_footprint+1)
-##            neighbors['x'][iSl, jSl, -1].fill(s[0])
-##            neighbors['y'][iSl, jSl, -1].fill(s[1])
-##            neighbors['which_spot'][iSl, jSl, -1].fill(which_spot)
-##            neighbors['distance_squared'][iSl, jSl, -1] = (
-##                (new_grid_x[iSl] - s[0]).reshape(2*scan_footprint + 1, 1)**2 +
-##                (new_grid_y[jSl] - s[1]).reshape(1, 2*scan_footprint + 1)**2)
-##            neighbors[iSl, jSl, :].sort(axis=2)#, order='distance_squared')
-##            ##print "s:", s
-##            ##print "Nearby i:", i, new_grid_x[iSl]
-##            ##print "Nearby j:", j, new_grid_y[jSl]
-##            ##for k in range(neighbors.shape[2]):
-##            ##    print
-##            ##    print "K:", k
-##            ##    print "Neighbors x:\n", neighbors['x'][iSl, jSl, k]
-##            ##    print "Neighbors y:\n", neighbors['y'][iSl, jSl, k]
-##            ##    print "Neighbors distance squared:\n",
-##            ##    print neighbors['distance_squared'][iSl, jSl, k]
-##            ##raw_input()
-##    neighbors = neighbors[:, :, :-1] #Cut off the last fellow in the sort
-####    """Now scan through the nearby neighbors to find triangles which
-####    contain the desired scan points"""
-####    print "Finding triangles..."
-####    for i in range(neighbors.shape[0]):
-####        for j in range(neighbors.shape[1]):
-####            print "row, col:", i, j
-####            possible_corners = neighbors[['x', 'y']][i, j, :]
-####            point = (new_grid_x[i], new_grid_y[j])
-####            try:
-####                corners = find_bounding_triangle(point, possible_corners)
-####            except UserWarning:
-####                continue
-####            corner_indices = [i for i, c in enumerate(possible_corners)
-####                              if c in corners]                
-####            neighbors[i, j, :3] = neighbors[i, j, :][corner_indices]
-####    neighbors = neighbors[:, :, :3]
-##    print
-##    if verbose: print "Saving scan point neighbor information..."
-##    numpy.save(neighbors_name, neighbors)
-##    if display:
-##        display_neighbors_and_spots(neighbors, spot_images,
-##                                    new_grid_x, new_grid_y)
-##    return neighbors, spot_images
-##
-##def display_neighbors_and_spots(neighbors, spot_images, new_grid_x, new_grid_y):
-##    """Test our closest-point-finding."""
-##    print "Displaying actual scan points which neighbor new grid points."
-##    fig = pylab.figure()
-##    while True:
-##        i = raw_input('New grid i [exit]:')
-##        if i == '':
-##            break
-##        try:
-##            i = int(i)
-##        except ValueError:
-##            continue
-##        j = raw_input('New grid j [exit]:')
-##        if j == '':
-##            break
-##        try:
-##            j = int(j)
-##        except ValueError:
-##            continue
-##        possible_corners = neighbors[['x', 'y']][i, j, :]
-##        point = (new_grid_x[i], new_grid_y[j])
-##        print "Point:", point
-##        print "Possible corners:"
-##        print possible_corners
-##        try:
-##            corners = find_bounding_triangle(point, possible_corners)
-##        except UserWarning:
-##            corners = []
-##        pylab.clf()
-##        which_corner = -1
-##        for k in range(neighbors.shape[2]):
-##            marker = 'ro'
-##            if neighbors[['x', 'y']][i, j, k] in corners:
-##                which_corner += 1
-##                marker = 'bo'
-##                pylab.subplot(2, 2, which_corner+1)
-##                pylab.imshow(
-##                    spot_images[neighbors['which_spot'][i, j, k], :, :],
-##                    interpolation='nearest', cmap=pylab.cm.gray)
-##                pylab.title(
-##                    'Spot %i, Distance %0.2f\nPosition %0.2f, %0.2f'%(
-##                        neighbors['which_spot'][i, j, k],
-##                        neighbors['distance_squared'][i, j, k],
-##                        neighbors['x'][i, j, k], neighbors['y'][i, j, k]),
-##                    fontsize='small')
-##                pylab.xticks([])
-##                pylab.yticks([])
-##            pylab.subplot(2, 2, 4)
-##            pylab.plot(
-##                [neighbors['y'][i, j, k]], [neighbors['x'][i, j, k]], marker)
-##        pylab.subplot(2, 2, 4)
-##        pylab.plot(new_grid_y[j], new_grid_x[i], 'rx', markersize=20)
-##        pylab.axis('equal')
-##        pylab.grid()
-##        fig.show()
-##        fig.canvas.draw()
-##    return fig
-##
+def display_neighboring_frames(
+    data_source, xPix, yPix, zPix,
+    new_grid, frames_with_neighboring_illumination, neighbor_absolute_positions
+    ):
+    print "Displaying neighboring frames..."
+    """Display the neighboring frames"""
+    image_data = load_image_data(data_source, xPix, yPix, zPix)
+    from random import randint
+    fig = pylab.figure()
+    while True:
+        i = randint(0, new_grid.shape[1] - 1)
+        j = randint(0, new_grid.shape[2] - 1)
+        p = new_grid[:, i, j]
+        n = frames_with_neighboring_illumination[:, i, j]
+        n_pos = neighbor_absolute_positions[:, :, i, j]
+        print "Grid point", p, "has neighbors in frames", n
+        print "with positions:"
+        for n_p in n_pos:
+            print n_p
+        pylab.clf()
+        pylab.suptitle("Illumination near grid point at %0.2f, %0.2f"%(
+            p[0], p[1]))
+        x, y = numpy.round(p)
+        print "x, y:", x, y
+        footprint = 20
+        for i, f in enumerate(n):
+            pylab.subplot(2, 2, i+1)
+            showMe = numpy.array(image_data[f,
+                                            max(x-footprint, 0):x+footprint+1,
+                                            max(y-footprint, 0):y+footprint+1])
+            pylab.imshow(showMe, cmap=pylab.cm.gray, interpolation='nearest')
+            if showMe.shape == (2*footprint+1, 2*footprint+1):
+                central_dot = numpy.zeros(showMe.shape + (4,))
+                central_dot[footprint, footprint, 0::3] = 1
+                pylab.imshow(central_dot, interpolation='nearest')
+            pylab.title("Frame %i"%(f))
+        pylab.subplot(2, 2, 4)
+        pylab.plot(list(n_pos[1, :]) + [n_pos[1, 0]],
+                   list(n_pos[0, :]) + [n_pos[0, 0]], 'b.-')
+        pylab.plot(p[1], p[0], 'rx', markersize=20)
+        pylab.axis('equal')
+        pylab.grid()
+        ax = pylab.gca()
+        ax.set_ylim(ax.get_ylim()[::-1])
+        fig.show()
+        fig.canvas.draw()
+        raw_input()
+    return None

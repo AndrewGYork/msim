@@ -168,16 +168,16 @@ def z_t_series(
                 t_index = '_t%04i'%(j)
             else:
                 t_index = ''
-            for i, z in enumerate(z_positions):
-                if z is not None:
-                    piezo.move(float(z))
-                    z_index = '_z%04i'%(i)
-                else:
-                    z_index = ''
-                for c in colors:
-                    if len(colors) > 1 or delay > 0:
-                        filter_wheel.move(c[1])
-                        laser_shutters.open(c[0])
+            for c in colors:
+                if len(colors) > 1 or delay > 0:
+                    filter_wheel.move(c[1])
+                    laser_shutters.open(c[0])
+                for i, z in enumerate(z_positions):
+                    if z is not None:
+                        piezo.move(float(z))
+                        z_index = '_z%04i'%(i)
+                    else:
+                        z_index = ''
                     file_name = (basename + '_c' + c[0] + '_' + c[1] +
                                  t_index + z_index + ext)
                     print file_name
@@ -205,8 +205,6 @@ def z_t_series(
                             filter_wheel.move(c[1])
                             laser_shutters.open(c[0])
                         else: #It worked!
-                            if len(colors) > 1:
-                                laser_shutters.shut(c[0])
                             break
                     else: #We failed a bunch of times
                         raise exc
@@ -217,6 +215,8 @@ def z_t_series(
                     c_points.append(c)
                     print "DMD subprocess report:"
                     micromirrors.readout()
+                if len(colors) > 1:
+                    laser_shutters.shut(c[0])
     except:
         print "Something went wrong, better close the shutters..."
         raise
@@ -269,9 +269,9 @@ if __name__ == '__main__':
 ##        )
 
     filenames, t_points, z_points = z_t_series(
-        time_delays=[20],
+        time_delays=[20]*30,
 ##        z_positions=[0, 0, 0, 0],
-        z_positions=range(-10, 26, 2),
+        z_positions=range(-25, 20, 2),
         repetition_period_microseconds='4500',
 ##        illumination_microseconds=100, #important for widefield
         pattern='sim',

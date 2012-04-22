@@ -32,13 +32,14 @@ def generate_lattice(
     lattice_points = lp[valid]
     return lattice_points
 
-half_distance = 14
+half_distance = 8
 step_size = 1
 image_pix = (768, 1024)
+preframes = 3
 
 delta_x = int(numpy.round(2*half_distance))
 delta_y = int(numpy.round(numpy.round(delta_x * 0.5 * numpy.sqrt(3))))
-num_shifts = delta_x * delta_y / (step_size**2)
+num_shifts = preframes + delta_x * delta_y / (step_size**2)
 print "Delta x:", delta_x
 print "Delta y:", delta_y
 print "Step size:", step_size
@@ -53,7 +54,7 @@ lattice_vectors=(numpy.array((delta_x, 0)),
 offset_vector = numpy.array((illumination_pattern.shape[0]//2,
                              illumination_pattern.shape[1]//2))
 
-sh = -1
+sh = preframes - 1 #First few frames are blank, 'cause our camera is craaaazy
 for y in range(0, delta_y, step_size):
     for x in range(0, delta_x, step_size):
         sh += 1
@@ -66,7 +67,7 @@ for y in range(0, delta_y, step_size):
             i, j = p
             """Add a PSF to the grid"""
             try:
-                illumination_pattern[sh, i:i+2, j:j+2] = 255
+                illumination_pattern[sh, i:i+1, j:j+1] = 255
             except IndexError:
                 print "Skipping spot at", i, j
 ##        if sh == 0:

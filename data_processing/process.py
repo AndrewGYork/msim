@@ -1,5 +1,5 @@
 """What data are we processing?"""
-data_dir = '2011_10_28\\2_color_u2os\\05_cells'
+data_dir = 'test_stack'
 data_filename = 'u2os_488_z????.raw'
 lake_filename = '01_lake_488.raw'
 background_filename = '02_background.raw'
@@ -18,7 +18,7 @@ import os, glob, pprint, numpy
 import array_illumination
 
 data_filename = os.path.join(os.getcwd(), data_dir, data_filename)
-data_filenames_list = glob.glob(data_filename)
+data_filenames_list = sorted(glob.glob(data_filename))
 print "Data sources:", data_filename
 print "Data filename list:"
 for i in data_filenames_list:
@@ -61,10 +61,10 @@ print "Initial position:"
 print offset_vector
 
 """Define a new Cartesian grid for Enderlein's trick:"""
-new_grid_x = numpy.linspace(0, xPix-1, 2*xPix)
-new_grid_y = numpy.linspace(0, yPix-1, 2*yPix)
+new_grid_xrange = 0, xPix-1, 2*xPix
+new_grid_yrange = 0, yPix-1, 2*yPix
 
-num_processes = 2
+num_processes = 5
 for f in data_filenames_list:
     print
     print f
@@ -75,7 +75,7 @@ for f in data_filenames_list:
         lattice_vectors=lattice_vectors,
         offset_vector=offset_vector,
         shift_vector=shift_vector,
-        new_grid_x=new_grid_x, new_grid_y=new_grid_y,
+        new_grid_xrange=new_grid_xrange, new_grid_yrange=new_grid_yrange,
         num_processes = num_processes,
         window_footprint=10,
         aperture_size=3,

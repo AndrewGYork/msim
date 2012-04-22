@@ -1,4 +1,4 @@
-import os, sys, cPickle, pprint, subprocess
+import os, sys, cPickle, pprint, subprocess, time
 from itertools import product
 import numpy, pylab
 from scipy.ndimage import gaussian_filter, median_filter, interpolation
@@ -201,7 +201,7 @@ def enderlein_image_parallel(
     data_filename, lake_filename, background_filename,
     xPix, yPix, zPix, steps, preframes,
     lattice_vectors, offset_vector, shift_vector,
-    new_grid_x, new_grid_y,
+    new_grid_xrange, new_grid_yrange,
     num_processes=1,
     window_footprint=10,
     aperture_size=3,
@@ -239,41 +239,59 @@ def enderlein_image_parallel(
             input_arguments['show_slices'] = False #Difficult for parallel
             input_arguments['display'] = False #Annoying for parallel
             input_arguments['verbose'] = False #Annoying for parallel
-##            input_arguments['new_grid_x'] = None
-##            input_arguments['new_grid_y'] = None
             
-            step_boundaries = range(0, steps, 10) + [steps]
-            for i in range(len(step_boundaries) - 1):
-                input_arguments['start_frame'] = step_boundaries[i]
-                input_arguments['end_frame'] = step_boundaries[i+1] - 1
-                output_filename = '%i_%i_intermediate_data.pkl'%(
-                    input_arguments['start_frame'],
-                    input_arguments['end_frame'])
-                sys.stdout.write(
-                    "\rProcessing frames: " +
-                    repr(input_arguments['start_frame']) + '-' +
-                    repr(input_arguments['end_frame']) + ' '*10)
-                sys.stdout.flush()
-                sub_images = enderlein_image_subprocess(**input_arguments)
-##                command_string = """
-##import array_illumination, cPickle
-####input_arguments=%s
-####sub_images = array_illumination.enderlein_image_subprocess(**input_arguments)
-####cPickle.dump(sub_images, %s, protocol=2)
-##"""#%(repr(input_arguments), output_filename)
-##                print command_string
-##                proc = subprocess.Popen(
-##                    [sys.executable, '-c %s'%command_string],
-##                    stdin=subprocess.PIPE,
-##                    stdout=subprocess.PIPE,
-##                    stderr=subprocess.PIPE)
-##                print proc.communicate()
-##                raw_input()
-                if i == 0:
-                    images = sub_images
-                else:
-                    for k in images.keys():
-                        images[k] += sub_images[k]
+            step_boundaries = range(0, steps, 5) + [steps]
+            step_boundaries = [
+                (step_boundaries[i], step_boundaries[i+1] - 1)
+                for i in range(len(step_boundaries)-1)]
+            running_processes = {}
+            first_harvest = True
+            while len(running_processes) > 0 or len(step_boundaries) > 0:
+                """Load up the subprocesses"""
+                while (len(running_processes) < num_processes and
+                       len(step_boundaries) > 0):
+                    sb = step_boundaries.pop(0)
+                    (input_arguments['start_frame'],
+                     input_arguments['end_frame']) = (sb)
+                    output_filename = '%i_%i_intermediate_data.temp'%(sb)
+                    sys.stdout.write(
+                        "\rProcessing frames: " + repr(sb[0]) + '-' +
+                        repr(sb[1]) + ' '*10)
+                    sys.stdout.flush()
+                    command_string = """
+import array_illumination, cPickle
+from numpy import array
+input_arguments=%s
+sub_images = array_illumination.enderlein_image_subprocess(**input_arguments)
+cPickle.dump(sub_images, open('%s', 'wb'), protocol=2)
+"""%(repr(input_arguments), output_filename)
+                    running_processes[output_filename] = subprocess.Popen(
+                        [sys.executable, '-c %s'%command_string],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE)
+                """Poke each subprocess, harvest the finished ones"""
+                pop_me = []
+                for f, proc in running_processes.items():
+                    if proc.poll() is not None: #Time to harvest
+                        pop_me.append(f)
+                        report = proc.communicate()
+                        if report != ('', ''):
+                            print report
+                            raise UserWarning("Problem with a subprocess.")
+                        sub_images = cPickle.load(open(f, 'rb'))
+                        os.remove(f)
+                        
+                        if first_harvest:
+                            images = sub_images
+                            first_harvest = False
+                        else:
+                            for k in images.keys():
+                                images[k] += sub_images[k]
+                for p in pop_me: #Forget about the harvested processes
+                    running_processes.pop(p)
+                """Chill for a second"""
+                time.sleep(0.2)
         images['enderlein_image'].tofile(enderlein_image_name)
         if make_widefield_image:
             images['widefield_image'].tofile(basename + '_widefield.raw')
@@ -290,7 +308,7 @@ def enderlein_image_subprocess(
     data_filename, lake_filename, background_filename,
     xPix, yPix, zPix, steps, preframes,
     lattice_vectors, offset_vector, shift_vector,
-    new_grid_x, new_grid_y,
+    new_grid_xrange, new_grid_yrange,
     start_frame=None, end_frame=None,
     window_footprint=10,
     aperture_size=3,
@@ -319,6 +337,8 @@ def enderlein_image_subprocess(
         start_frame = 0
     if end_frame is None:
         end_frame = steps - 1
+    new_grid_x = numpy.linspace(*new_grid_xrange)
+    new_grid_y = numpy.linspace(*new_grid_yrange)
     enderlein_image = numpy.zeros(
         (new_grid_x.shape[0], new_grid_y.shape[0]), dtype=numpy.float)
     enderlein_normalization = numpy.zeros_like(enderlein_image)

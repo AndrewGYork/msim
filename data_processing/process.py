@@ -1,6 +1,6 @@
 """What data are we processing?"""
-data_dir = '2011_11_01\\silicone_objective'
-data_filename = 'beads_488_z????.raw'
+data_dir = '2011_11_04\\05_6um_stack_copy'
+data_filename = 'tubules_488_z????.raw'
 lake_filename = '01_lake.raw'
 background_filename = '02_background.raw'
 xPix, yPix, zPix, steps = 480, 480, 598, 598
@@ -11,7 +11,7 @@ scan_type = 'dmd'
 scan_dimensions = (26, 23)
 preframes = 0
 num_harmonics = 3
-use_all_lake_parameters = True #Useful if sample-based lattice detection fails
+use_all_lake_parameters = False #Useful if sample-based lattice detection fails
 
 ##Don't edit below here
 ###############################################################################
@@ -66,7 +66,7 @@ print offset_vector
 new_grid_xrange = 0, xPix-1, 2*xPix
 new_grid_yrange = 0, yPix-1, 2*yPix
 
-num_processes = 12
+num_processes = 6
 for f in data_filenames_list:
     print
     print f
@@ -121,13 +121,13 @@ if len(data_filenames_list) > 1:
     e_notes.write("Left/right: %i pixels\r\n"%(enderlein_stack.shape[2]))
     e_notes.write("Up/down: %i pixels\r\n"%(enderlein_stack.shape[1]))
     e_notes.write("Number of images: %i\r\n"%(enderlein_stack.shape[0]))
-    e_notes.write("Data type: 16-bit unsigned integers\r\n")
+    e_notes.write("Data type: 64-bit real\r\n")
     e_notes.write("Byte order: Intel (little-endian))\r\n")
     e_notes.close()
     w_notes.write("Left/right: %i pixels\r\n"%(widefield_stack.shape[2]))
     w_notes.write("Up/down: %i pixels\r\n"%(widefield_stack.shape[1]))
     w_notes.write("Number of images: %i\r\n"%(widefield_stack.shape[0]))
-    w_notes.write("Data type: 16-bit unsigned integers\r\n")
+    w_notes.write("Data type: 64-bit real\r\n")
     w_notes.write("Byte order: Intel (little-endian))\r\n")
     w_notes.close()
     print "Done joining."

@@ -32,7 +32,7 @@ def generate_lattice(
     lattice_points = lp[valid]
     return lattice_points
 
-half_distance = 13
+half_distance = 8
 step_size = 1
 image_pix = (768, 1024)
 preframes = 3

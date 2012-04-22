@@ -20,15 +20,21 @@ class ALP:
         _check(DMD_api.AlpDevAlloc(
             _ALP_DEFAULT, _ALP_DEFAULT, ctypes.byref(self.id)))
         print " Device ID:", self.id.value
+        self.seq_id = None
         return None
 
     def apply_settings(
         self, illumination_filename='illumination_pattern.raw',
         illuminate_time=2200, picture_time=4500, trigger_delay=0):
         """illuminate_time, picture_time, and trigger_delay are in
-        microseconds"""
+        microseconds
+
+        """
 
         print "Applying settings to DMD..."
+        if self.seq_id is not None:
+            _check(DMD_api.AlpSeqFree(self.id, self.seq_id))
+            self.seq_id = None
         """Check the DMD type"""
         nDmdType = ctypes.c_long()
         _check(DMD_api.AlpDevInquire(
@@ -78,6 +84,14 @@ class ALP:
         print " ALP data format:", paramVal.value
         return num_frames
 
+    def apply_widefield_settings(
+        self, illuminate_time=50, picture_time=4500):
+        if picture_time == 4500 and illuminate_time > 2200:
+            raise UserWarning("illuminate_time is too long.")
+        return self.apply_settings(
+            illumination_filename='widefield_pattern.raw',
+            illuminate_time=illuminate_time, picture_time=picture_time)
+
     def display_pattern(self):
         """Start sequence"""
         _check(DMD_api.AlpProjStart(self.id, self.seq_id))
@@ -93,7 +107,10 @@ class ALP:
         _check(DMD_api.AlpDevFree(self.id))
 
 class Micromirror_Subprocess:
-    def __init__(self, delay=0.01):
+    def __init__(
+        self, delay=0.01,
+        illuminate_time=2200, picture_time=4500,
+        pattern='sim'):
         """To synchronize the DMD and the camera polling, we need two
         processes. 'delay' determines how long the DMD subprocess
         waits after a trigger message before displaying a pattern.
@@ -105,7 +122,7 @@ class Micromirror_Subprocess:
         cmdString = """
 import dmd, sys, time
 micromirrors = dmd.ALP()
-num_frames = micromirrors.apply_settings()
+num_frames = %s
 sys.stdout.write(repr(int(num_frames)) + '\\n')
 while True:
     sys.stdout.flush()
@@ -115,7 +132,10 @@ while True:
     time.sleep(%s) #Give the camera time to arm
     micromirrors.display_pattern()
 micromirrors.close()
-"""%(repr(delay))
+"""%({'sim': 'micromirrors.apply_settings(' +
+      'illuminate_time=%i, picture_time=%i,)'%(illuminate_time, picture_time),
+      'widefield': 'micromirrors.apply_widefield_settings()'}[pattern],
+     repr(delay))
         self.subprocess = subprocess.Popen( #python vs. pythonw on Windows?
             [sys.executable, '-c %s'%cmdString],
             stdin=subprocess.PIPE,
@@ -147,11 +167,19 @@ micromirrors.close()
 
 if __name__ == '__main__':
     print "Creating a micromirror subprocess..."
-    micromirrors = Micromirror_Subprocess()
-    for i in range(10):
-        micromirrors.display_pattern()
-        micromirrors.readout()
+    micromirrors = Micromirror_Subprocess(
+        illuminate_time=6700, picture_time=20000)
+    micromirrors.display_pattern()
+    micromirrors.readout()
     micromirrors.close()
+
+##    print "Creating a widefield micromirror subprocess..."
+##    micromirrors = Micromirror_Subprocess(pattern='widefield')
+##    for i in range(10):
+##        micromirrors.display_pattern()
+##        micromirrors.readout()
+##    micromirrors.close()
+
 ##    print "Checking micromirror timing..."
 ##    import time, numpy, pylab
 ##    dmd = ALP()

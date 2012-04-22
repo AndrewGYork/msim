@@ -31,7 +31,6 @@ def get_lattice_vectors(
     show_lattice=False):
     """Given a swept-field confocal image stack, finds
     the basis vectors of the illumination lattice pattern."""
-
     if lake is not None:
         print " Detecting lake illumination lattice parameters..."
         (lake_lattice_vectors, lake_shift_vector, lake_offset_vector
@@ -342,7 +341,16 @@ def enderlein_image_subprocess(
 
     intensities_vs_galvo_position = cPickle.load(
         open(lake_intensities_name, 'rb'))
+    lake_directory_name = os.path.dirname(lake_intensities_name)
     background_frame = numpy.fromfile(background_name).reshape(xPix, yPix)
+    try:
+        hot_pixels = numpy.fromfile(
+            os.path.join(lake_directory_name, 'hot_pixels.txt'), sep=', ')
+    except IOError:
+        hot_pixels = None
+        raise
+    else:
+        hot_pixels = hot_pixels.reshape(2, len(hot_pixels)/2)
 
     if show_steps or show_slices: fig = pylab.figure()
     if start_frame is None:
@@ -393,6 +401,8 @@ def enderlein_image_subprocess(
         im = load_image_slice(
             filename=data_filename, xPix=xPix, yPix=yPix,
             preframes=preframes, which_slice=z)
+        if hot_pixels is not None:
+            im = remove_hot_pixels(im, hot_pixels)
         this_frames_enderlein_image.fill(0.)
         this_frames_normalization.fill(1e-12)
         if verbose:
@@ -1178,9 +1188,18 @@ def spot_intensity_vs_galvo_position(
     light-free background images."""
 
     lake_basename = os.path.splitext(lake_filename)[0]
+    lake_directory_name = os.path.dirname(lake_basename)
     lake_intensities_name = lake_basename + '_spot_intensities.pkl'
     background_basename = os.path.splitext(background_filename)[0]
     background_name = background_basename + '_background_image.raw'
+    try:
+        hot_pixels = numpy.fromfile(
+            os.path.join(lake_directory_name, 'hot_pixels.txt'), sep=', ')
+    except IOError:
+        hot_pixels = None
+        raise
+    else:
+        hot_pixels = hot_pixels.reshape(2, len(hot_pixels)/2)
     
     if (os.path.exists(lake_intensities_name) and
         os.path.exists(background_name)):
@@ -1200,6 +1219,8 @@ def spot_intensity_vs_galvo_position(
             bg += background_image_data[z, :, :]
         bg *= 1.0 / background_image_data.shape[0]
         del background_image_data
+        if hot_pixels is not None:
+            bg = remove_hot_pixels(bg, hot_pixels)
         print "Background image complete."
 
         lake_image_data = load_image_data(
@@ -1210,7 +1231,9 @@ def spot_intensity_vs_galvo_position(
         if show_steps: fig = pylab.figure()
         print "Computing flat-field calibration..."
         for z in range(lake_image_data.shape[0]):
-            im = lake_image_data[z, :, :]
+            im = numpy.array(lake_image_data[z, :, :])
+            if hot_pixels is not None:
+                im = remove_hot_pixels(im, hot_pixels)
             sys.stdout.write("\rCalibration image %i"%(z))
             sys.stdout.flush()
             lattice_points, i_list, j_list = generate_lattice(
@@ -1270,6 +1293,11 @@ def spot_intensity_vs_galvo_position(
         pylab.legend()
         fig.show()
     return intensities_vs_galvo_position, bg #bg is short for 'background'
+
+def remove_hot_pixels(image, hot_pixels):
+    for y, x in hot_pixels:
+        image[x, y] = numpy.median(image[x-1:x+2, y-1:y+2])
+    return image
 
 def generate_lattice(
     image_shape, lattice_vectors, center_pix='image', edge_buffer=2,

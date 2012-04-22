@@ -15,9 +15,16 @@ class Edge:
         wRecState = ctypes.c_uint16(0) #Turn off recording
         PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
         print " Camera handle:", self.camera_handle.value
+        self.buffer_numbers = []
         return None
 
-    def apply_settings(self, trigger='auto trigger'):
+    def apply_settings(
+        self, trigger='auto trigger', exposure_time_microseconds=2200):
+##        wRecState = ctypes.c_uint16(0) #Turn off recording
+##        PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
+##        for buf in self.buffer_numbers: #Free any allocated buffers
+##            PCO_api.PCO_FreeBuffer(self.camera_handle, buf)
+
         PCO_api.PCO_ResetSettingsToDefault(self.camera_handle)
 
         wSensor = ctypes.c_uint16(0)
@@ -109,7 +116,7 @@ class Edge:
         print "Setting delay and exposure time..."
         dwDelay = ctypes.c_uint32(0)
         wTimeBaseDelay = ctypes.c_uint16(0)
-        dwExposure = ctypes.c_uint32(2200)
+        dwExposure = ctypes.c_uint32(int(exposure_time_microseconds))
         wTimeBaseExposure = ctypes.c_uint16(1)
         PCO_api.PCO_SetDelayExposureTime(
             self.camera_handle,
@@ -208,9 +215,9 @@ class Edge:
                         print "After", num_polls, "polls, buffer",
                         print self.buffer_numbers[which_buf].value, "is ready."
                     break
-                if num_polls > 5e6:
+                if num_polls > 5e5:
                     libc.fclose(file_pointer)
-                    raise UserWarning("After five million polls, no buffer.")
+                    raise UserWarning("After half a  million polls, no buffer.")
 
             if which_im >= preframes:
                 response = libc.fwrite(

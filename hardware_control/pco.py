@@ -11,7 +11,11 @@ class Edge:
     def __init__(self):
         self.camera_handle = ctypes.c_ulong()
         print "Opening camera..."
-        PCO_api.PCO_OpenCamera(ctypes.byref(self.camera_handle), 0)
+        try:
+            PCO_api.PCO_OpenCamera(ctypes.byref(self.camera_handle), 0)
+        except WindowsError:
+            print "\n\n Failed to open the camera. Is Camware open?\n\n"
+            raise
         wRecState = ctypes.c_uint16(0) #Turn off recording
         PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
         print " Camera handle:", self.camera_handle.value

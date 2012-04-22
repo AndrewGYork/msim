@@ -1,8 +1,4 @@
 """What data are we processing?"""
-data_dir = 'test_stack'
-data_filename = 'u2os_488_z000[012].raw'
-lake_filename = '01_lake_488.raw'
-background_filename = '02_background.raw'
 xPix, yPix, zPix, steps = 480, 480, 224, 224
 background_zPix = zPix
 extent = 20
@@ -18,17 +14,12 @@ use_all_lake_parameters = True #Useful if sample-based lattice detection fails
 import os, glob, pprint, numpy
 import array_illumination
 
-data_filename = os.path.join(os.getcwd(), data_dir, data_filename)
-data_filenames_list = sorted(glob.glob(data_filename))
-print "Data sources:", data_filename
-print "Data filename list:"
-for i in data_filenames_list:
-    print '.  ' + i
+(data_dir, data_filenames_list, lake_filename, background_filename
+ ) = array_illumination.get_data_locations()
+
 ##print "Common prefix:", os.path.commonprefix(data_filenames_list)
 ##print "Stack basename:", os.path.split(os.path.commonprefix(data_filenames_list))[1]
 ##raw_input()
-lake_filename = os.path.join(os.getcwd(), data_dir, lake_filename)
-background_filename = os.path.join(os.getcwd(), data_dir, background_filename)
 print "Calibration source:", lake_filename
 print "Background source:", background_filename
 
@@ -69,7 +60,7 @@ print offset_vector
 new_grid_xrange = 0, xPix-1, 2*xPix
 new_grid_yrange = 0, yPix-1, 2*yPix
 
-num_processes = 1
+num_processes = 6
 for f in data_filenames_list:
     print
     print f

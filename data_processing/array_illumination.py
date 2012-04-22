@@ -352,12 +352,12 @@ def enderlein_image_subprocess(
 
     intensities_vs_galvo_position = cPickle.load(
         open(lake_intensities_name, 'rb'))
-    lake_directory_name = os.path.dirname(lake_intensities_name)
+    background_directory_name = os.path.dirname(background_name)
     background_frame = numpy.fromfile(
         background_name).reshape(xPix, yPix).astype(float)
     try:
         hot_pixels = numpy.fromfile(
-            os.path.join(lake_directory_name, 'hot_pixels.txt'), sep=', ')
+            os.path.join(background_directory_name, 'hot_pixels.txt'), sep=', ')
     except:
         hot_pixels = None
         skip_hot_pix = raw_input("Hot pixel list not found. Continue? y/[n]:")
@@ -1202,13 +1202,13 @@ def spot_intensity_vs_galvo_position(
     light-free background images."""
 
     lake_basename = os.path.splitext(lake_filename)[0]
-    lake_directory_name = os.path.dirname(lake_basename)
     lake_intensities_name = lake_basename + '_spot_intensities.pkl'
     background_basename = os.path.splitext(background_filename)[0]
     background_name = background_basename + '_background_image.raw'
+    background_directory_name = os.path.dirname(background_basename)
     try:
         hot_pixels = numpy.fromfile(
-            os.path.join(lake_directory_name, 'hot_pixels.txt'), sep=', ')
+            os.path.join(background_directory_name, 'hot_pixels.txt'), sep=', ')
     except IOError:
         skip_hot_pix = raw_input("Hot pixel list not found. Continue? y/[n]:")
         if skip_hot_pix != 'y':
@@ -1410,6 +1410,62 @@ def join_enderlein_images(
     w_notes.close()
     print "Done joining."
     return None
+
+def get_data_locations():
+    """Assumes that hot_pixels.txt and background.raw are in the same
+    directory ast array_illumination.py"""
+    import Tkinter, tkFileDialog, tkSimpleDialog, glob, array_illumination
+
+    module_dir = os.path.dirname(array_illumination.__file__)
+    background_filename = os.path.join(module_dir, 'background.raw')
+
+    tkroot = Tkinter.Tk()
+    tkroot.withdraw()
+    data_filename = str(os.path.normpath(tkFileDialog.askopenfilename(
+        title=("Select one of your raw SIM data files"),
+        filetypes=[('Raw binary', '.raw')],
+        defaultextension='.raw',
+        initialdir=os.getcwd()
+        ))) #Careful about Unicode here!
+    data_dir = os.path.dirname(data_filename)
+
+    while True:
+        wildcard_data_filename = tkSimpleDialog.askstring(
+            title='Filename pattern',
+            prompt=("Use '?' as a wildcard\n\n" +
+                    "For example:\n" +
+                    "  image_????.raw\n" +
+                    "would match:\n" +
+                    "  image_0001.raw\n" +
+                    "  image_0002.raw\n" +
+                    "  etc...\n" +
+                    "but would not match:\n" +
+                    "   image_001.raw"),
+            initialvalue=os.path.split(data_filename)[1])
+        data_filenames_list = sorted(glob.glob(
+            os.path.join(data_dir, wildcard_data_filename)))
+        print "Data filenames:"
+        for f in data_filenames_list:
+            print '.  ' + f
+        response = raw_input("Are those the files you want to process? [y]/n:")
+        if response == 'n':
+            continue
+        else:
+            break
+
+    lake_filename = str(os.path.normpath(tkFileDialog.askopenfilename(
+        title=("Select your lake calibration raw data file"),
+        filetypes=[('Raw binary', '.raw')],
+        defaultextension='.raw',
+        initialdir=os.path.join(data_dir, os.pardir),
+        initialfile='lake.raw'
+        ))) #Careful about Unicode here!
+
+    tkroot.destroy()
+    return data_dir, data_filenames_list, lake_filename, background_filename
+
+if __name__ == '__main__':
+    get_data_locations()
 
 #####
 #####   Leftover code from when I was doing triangulation myself.            

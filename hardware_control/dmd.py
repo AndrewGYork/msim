@@ -85,7 +85,7 @@ class ALP:
         return num_frames
 
     def apply_widefield_settings(
-        self, illuminate_time=50, picture_time=4500):
+        self, illuminate_time=250, picture_time=4500):
         if picture_time == 4500 and illuminate_time > 2200:
             raise UserWarning("illuminate_time is too long.")
         return self.apply_settings(
@@ -109,7 +109,7 @@ class ALP:
 class Micromirror_Subprocess:
     def __init__(
         self, delay=0.01,
-        illuminate_time=2200, picture_time=4500,
+        illuminate_time=None, picture_time=4500,
         pattern='sim'):
         """To synchronize the DMD and the camera polling, we need two
         processes. 'delay' determines how long the DMD subprocess
@@ -118,6 +118,12 @@ class Micromirror_Subprocess:
         proc.stdin.write(), two lines need to be read out with
         proc.stdout.readline()."""
         import subprocess, sys
+
+        if illuminate_time is None:
+            if pattern == 'sim':
+                illuminate_time = 2200
+            if pattern == 'widefield':
+                illuminate_time = 250
 
         cmdString = """
 import dmd, sys, time
@@ -132,9 +138,9 @@ while True:
     time.sleep(%s) #Give the camera time to arm
     micromirrors.display_pattern()
 micromirrors.close()
-"""%({'sim': 'micromirrors.apply_settings(' +
-      'illuminate_time=%i, picture_time=%i,)'%(illuminate_time, picture_time),
-      'widefield': 'micromirrors.apply_widefield_settings()'}[pattern],
+"""%({'sim': 'micromirrors.apply_settings',
+      'widefield': 'micromirrors.apply_widefield_settings'}[pattern] +
+     '(illuminate_time=%i, picture_time=%i,)'%(illuminate_time, picture_time),
      repr(delay))
         self.subprocess = subprocess.Popen( #python vs. pythonw on Windows?
             [sys.executable, '-c %s'%cmdString],

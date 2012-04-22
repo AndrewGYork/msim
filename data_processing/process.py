@@ -1,17 +1,17 @@
 """What data are we processing?"""
-data_dir = '2011_11_04\\05_6um_stack_copy'
-data_filename = 'tubules_488_z????.raw'
-lake_filename = '01_lake.raw'
-background_filename = '02_background.raw'
-xPix, yPix, zPix, steps = 480, 480, 598, 598
+data_dir = '2011_11_10\\01_worm_244fr_fine_steps'
+data_filename = 'worm_c488_z????.raw'
+lake_filename = 'lake_244fr_c488.raw'
+background_filename = 'background_244fr.raw'
+xPix, yPix, zPix, steps = 480, 480, 224, 224
 background_zPix = zPix
-extent = 12
+extent = 20
 animate = False #Temporarily set to "True" if you have to adjust 'extent'
 scan_type = 'dmd'
-scan_dimensions = (26, 23)
+scan_dimensions = (16, 14)
 preframes = 0
-num_harmonics = 3
-use_all_lake_parameters = False #Useful if sample-based lattice detection fails
+num_harmonics = 3 #Default to 3, might have to lower to 2
+use_all_lake_parameters = True #Useful if sample-based lattice detection fails
 
 ##Don't edit below here
 ###############################################################################

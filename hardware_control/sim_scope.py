@@ -1,17 +1,22 @@
 import os, time
-import pco, dmd, stage
+import pco, dmd, stage, shutters
 
 def snap(
+    colors=['488'],
     file_basename='image.raw', save_path=None, preframes=3,
-    pattern='sim', repetition_period_microseconds='4500'):
+    pattern='sim', repetition_period_microseconds='4500',
+    illumination_microseconds=None):
     input_variables = locals()
     return z_t_series(**input_variables)
     
 def z_t_series(
-    z_positions=[None], time_delays=[None],
+    colors=['488'], z_positions=[None], time_delays=[None],
     file_basename='image.raw', save_path=None, preframes=3,
-    pattern='sim', repetition_period_microseconds='4500'):
+    pattern='sim', repetition_period_microseconds='4500',
+    illumination_microseconds=None):
     """Take a sequence of SIM or widefield frames while moving the piezo"""
+
+    print "Preframes to be discarded:", preframes
 
     available_exposures = {
         '4500': {'pt': 4500, 'it': 2200, 'et': 2200},
@@ -30,6 +35,15 @@ def z_t_series(
             print k
         raise
 
+    if illumination_microseconds is not None:
+        illumination_microseconds = int(illumination_microseconds)
+        if exposure['it'] > illumination_microseconds:
+            exposure['it'] = illumination_microseconds
+        else:
+            print "Max illumination time:", exposure['it'], 'microseconds.'
+            print "Requested illumination time:", illumination_microseconds
+            raise UserWarning('Pick a shorter exposure time')
+
     micromirror_parameters = {
         'delay': 0.02,
         'pattern': pattern,
@@ -37,10 +51,13 @@ def z_t_series(
         'picture_time': exposure['pt'],
         }
     micromirrors = dmd.Micromirror_Subprocess(**micromirror_parameters)
-    print "Preframes to be discarded:", preframes
 
+    laser_shutters = shutters.Laser_Shutters()
+    shutter_delay = 0.00 #Extra seconds we wait for the shutter to open (zero?)
+    
     if z_positions[0] is not None:
         piezo = stage.Z()
+
     camera = pco.Edge()
     camera_parameters = {
         'trigger': "external trigger/software exposure control",
@@ -49,78 +66,112 @@ def z_t_series(
     camera.apply_settings(**camera_parameters)
     camera.arm()
     basename, ext = os.path.splitext(file_basename)
-    filenames, z_points, t_points = [], [], []
-    for j, delay in enumerate(time_delays):
-        if delay is not None:
-            print "\nPausing for %0.3f seconds..."%(delay)
-            time.sleep(delay)
-            print "Done pausing."
-            t_index = '_t%04i'%(j)
-        else:
-            t_index = ''
-        for i, z in enumerate(z_positions):
-            if z is not None:
-                piezo.move(float(z))
-                z_index = '_z%04i'%(i)
+    filenames, c_points, z_points, t_points = [], [], [], []
+    try: #Don't worry, we re-raise exceptions in here!
+        if len(colors) == 1:
+            laser_shutters.open(colors[0])
+            time.sleep(shutter_delay)
+        for j, delay in enumerate(time_delays):
+            if delay is not None:
+                print "\nPausing for %0.3f seconds..."%(delay)
+                if delay > 0:
+                    for c in colors:
+                        laser_shutters.shut(c)
+                time.sleep(delay)
+                print "Done pausing."
+                t_index = '_t%04i'%(j)
             else:
-                z_index = ''
-            file_name = basename + t_index + z_index + ext
-            filenames.append(file_name)
-            print file_name
-            for tries in range(1):
-                print "Triggering micromirrors..."
-                micromirrors.display_pattern()
-                try:
-                    camera.record_to_file(
-                        num_images=micromirrors.num_images, preframes=preframes,
-                        file_name=file_name, save_path=save_path)
-                except Exception as exc:
-                    print "\n Recording failed"
-                    print "Retrying...\n"
-                    print "Micromirrors postmortem:"
-                    micromirrors.close()
-                    print "Reopening micromirrors..."
-                    micromirrors = dmd.Micromirror_Subprocess(
-                        **micromirror_parameters)
-                    print "Closing and reopening camera..."
-                    camera.close()
-                    camera = pco.Edge()
-                    camera.apply_settings(**camera_parameters)
-                    camera.arm()
-                else: #It worked!
-                    break
-            else: #We failed a bunch of times
-                micromirrors.close()
-                raise exc
+                t_index = ''
+            for i, z in enumerate(z_positions):
+                if z is not None:
+                    piezo.move(float(z))
+                    z_index = '_z%04i'%(i)
+                else:
+                    z_index = ''
+                for c in colors:
+                    if len(colors) > 1:
+                        laser_shutters.open(c)
+                        time.sleep(shutter_delay)
+                    file_name = basename + '_c' + c + t_index + z_index + ext
+                    print file_name
+                    for tries in range(2):
+                        print "Triggering micromirrors..."
+                        micromirrors.display_pattern()
+                        try:
+                            camera.record_to_file(
+                                num_images=micromirrors.num_images, preframes=preframes,
+                                file_name=file_name, save_path=save_path)
+                        except Exception as exc:
+                            laser_shutters.shut(c)
+                            print "\n Recording failed"
+                            print "Retrying...\n"
+                            print "Micromirrors postmortem:"
+                            micromirrors.close()
+                            print "Reopening micromirrors..."
+                            micromirrors = dmd.Micromirror_Subprocess(
+                                **micromirror_parameters)
+                            print "Closing and reopening camera..."
+                            camera.close()
+                            camera = pco.Edge()
+                            camera.apply_settings(**camera_parameters)
+                            camera.arm()
+                            laser_shutters.open(c)
+                            time.sleep(shutter_delay)
+                        else: #It worked!
+                            if len(colors) > 1:
+                                laser_shutters.shut(c)
+                            break
+                    else: #We failed a bunch of times
+                        raise exc
 
-            z_points.append(z)
-            t_points.append(time.clock())
-            print "DMD subprocess report:"
-            micromirrors.readout()
-    camera.close()
-    micromirrors.close()
-    if z_positions[0] is not None:
-        piezo.close()
-    if z_positions[0] is not None or time_delays[0] is not None:
-        index = open(basename + '_index.txt', 'wb')
-        for i, fn in enumerate(filenames):
-            z = z_points[i]
-            t = t_points[i]
-            index.write(fn +
-                        ': z= %+0.3f microns'%(z*0.1) +
-                        ', t= %0.4f seconds\r\n'%(t))
-        index.close()
+                    filenames.append(file_name)
+                    z_points.append(z)
+                    t_points.append(time.clock())
+                    c_points.append(c)
+                    print "DMD subprocess report:"
+                    micromirrors.readout()
+    except:
+        print "Something went wrong, better close the shutters..."
+        raise
+    finally:
+        laser_shutters.close()
+        camera.close()
+        micromirrors.close()
+        if z_positions[0] is not None:
+            piezo.close()
+        if z_positions[0] is not None or time_delays[0] is not None:
+            index = open(basename + '_index.txt', 'wb')
+            for i, fn in enumerate(filenames):
+                z = z_points[i]
+                if z is None:
+                    z = 0
+                t = t_points[i]
+                c = c_points[i]
+                index.write(fn +
+                            ': c= %s'%(c) +
+                            ', z= %+0.3f microns'%(z*0.1) +
+                            ', t= %0.4f seconds\r\n'%(t))
+            index.close()
     return filenames, t_points, z_points
 
 if __name__ == '__main__':
-    snap(repetition_period_microseconds='4500', pattern='widefield')
-
-##    filenames, t_points, z_points = z_t_series(
-##        time_delays=[None],
-##        z_positions=range(0, 60, 0.5),
-##        file_basename='tubules_488.raw',
+##    snap(
 ##        repetition_period_microseconds='4500',
-##        pattern='sim')
+##        illumination_microseconds=None, #Default
+##        pattern='sim',
+##        colors=['488']
+##        )
+
+    filenames, t_points, z_points = z_t_series(
+        time_delays=[None],
+        z_positions=range(160, -210, -1),
+        file_basename='worm.raw',
+        repetition_period_microseconds='4500',
+##        illumination_microseconds=100, #important for widefield
+        pattern='sim',
+        colors=['488']
+        )
+
     
 ##    import numpy, pylab
 ##    fig = pylab.figure()

@@ -2,7 +2,7 @@ import serial
 
 class Z:
     def __init__(self):
-        self.ser = serial.Serial(0, 9600)
+        self.ser = serial.Serial(6, 9600) #Have to pick the right port
 
     def move(self, zPos=0.00):
         print "Moving piezo stage to %0.2f"%(zPos)

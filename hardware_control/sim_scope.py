@@ -1,5 +1,21 @@
 import os, time
 import pco, dmd, stage, shutters
+import numpy
+
+def get_save_file():
+    import Tkinter, tkFileDialog
+    tkroot = Tkinter.Tk()
+    tkroot.withdraw()
+    data_file = str(os.path.normpath(tkFileDialog.asksaveasfilename(
+        title=("Choose a file name and location"),
+        filetypes=[('Raw binary', '.raw')],
+        defaultextension='.raw',
+        initialfile='image.raw'))) #Careful about Unicode here!
+    tkroot.destroy()
+    if data_file == '':
+        raise UserWarning('No save file selected')
+    save_path, file_basename = os.path.split(data_file)
+    return save_path, file_basename
 
 def snap(
     colors=['488'],
@@ -11,10 +27,12 @@ def snap(
     
 def z_t_series(
     colors=['488'], z_positions=[None], time_delays=[None],
-    file_basename='image.raw', save_path=None, preframes=3,
+    file_basename=None, save_path=None, preframes=3,
     pattern='sim', repetition_period_microseconds='4500',
     illumination_microseconds=None):
     """Take a sequence of SIM or widefield frames while moving the piezo"""
+    if file_basename is None or save_path is None:
+        save_path, file_basename = get_save_file()
 
     print "Preframes to be discarded:", preframes
 
@@ -53,7 +71,7 @@ def z_t_series(
     micromirrors = dmd.Micromirror_Subprocess(**micromirror_parameters)
 
     laser_shutters = shutters.Laser_Shutters()
-    shutter_delay = 0.00 #Extra seconds we wait for the shutter to open (zero?)
+    shutter_delay = 0.05 #Extra seconds we wait for the shutter to open (zero?)
     
     if z_positions[0] is not None:
         piezo = stage.Z()
@@ -71,14 +89,16 @@ def z_t_series(
         if len(colors) == 1:
             laser_shutters.open(colors[0])
             time.sleep(shutter_delay)
+        if len(time_delays) > 1:
+            time_delays = [0] + time_delays
         for j, delay in enumerate(time_delays):
             if delay is not None:
                 print "\nPausing for %0.3f seconds..."%(delay)
                 if delay > 0:
                     for c in colors:
                         laser_shutters.shut(c)
-                time.sleep(delay)
-                print "Done pausing."
+                    time.sleep(delay)
+                    print "Done pausing."
                 t_index = '_t%04i'%(j)
             else:
                 t_index = ''
@@ -89,12 +109,12 @@ def z_t_series(
                 else:
                     z_index = ''
                 for c in colors:
-                    if len(colors) > 1:
+                    if len(colors) > 1 or delay > 0:
                         laser_shutters.open(c)
                         time.sleep(shutter_delay)
                     file_name = basename + '_c' + c + t_index + z_index + ext
                     print file_name
-                    for tries in range(2):
+                    for tries in range(4):
                         print "Triggering micromirrors..."
                         micromirrors.display_pattern()
                         try:
@@ -140,7 +160,7 @@ def z_t_series(
         if z_positions[0] is not None:
             piezo.close()
         if z_positions[0] is not None or time_delays[0] is not None:
-            index = open(basename + '_index.txt', 'wb')
+            index = open(os.path.join(save_path, basename + '_index.txt'), 'wb')
             for i, fn in enumerate(filenames):
                 z = z_points[i]
                 if z is None:
@@ -155,28 +175,27 @@ def z_t_series(
     return filenames, t_points, z_points
 
 if __name__ == '__main__':
+
+    """
+    HOLY CRAP DON'T EDIT ANYHTHING ABOVE HERE
+
+    THIS MEANS YOU, TEMPRINE!!!!!!!!!
+    """
+    
 ##    snap(
 ##        repetition_period_microseconds='4500',
-##        illumination_microseconds=None, #Default
+####        illumination_microseconds=None, #Important for widefield
 ##        pattern='sim',
 ##        colors=['488']
 ##        )
 
     filenames, t_points, z_points = z_t_series(
         time_delays=[None],
-        z_positions=range(160, -210, -1),
-        file_basename='worm.raw',
+        z_positions=range(-20,20,10),
         repetition_period_microseconds='4500',
 ##        illumination_microseconds=100, #important for widefield
         pattern='sim',
         colors=['488']
         )
-
-    
-##    import numpy, pylab
-##    fig = pylab.figure()
-##    pylab.plot(numpy.diff(t_points), '.-')
-##    fig.show()
-##    fig.canvas.draw()
 
     

@@ -12,14 +12,13 @@ scan_dimensions = None
 
 """Menagerie of data sources. Uncomment one of these lines:"""
 data_filename, lake_filename, xPix, yPix, zPix, steps, extent, scan_type, scan_dimensions = (
-    '07_4_pix_spots_1_pix_shifts_tubules.raw',
-    '02_4_pix_spots_1_pix_steps.raw',
-    1064, 1120, 340, 340, 20, 'dmd', (20, 17))
-
+    '02_tubules_60x_1p45.raw',
+    '01_lake_60x_1p45.raw',
+    640, 640, 340, 340, 17, 'dmd', (20, 17))
 
 background_filename, background_zPix = 'background.raw', 340
 
-data_dir = '2011_09_27'
+data_dir = '2011_10_06'
 
 ##Don't edit below here
 data_filename = os.path.join(os.getcwd(), data_dir, data_filename)
@@ -70,13 +69,14 @@ new_grid_y = numpy.linspace(0, yPix-1, yPix)
 
 """Interpolate the neighboring illumination points to calculate a
 higher resolution image"""
-window_footprint = 10 #For now, make this an even number
-aperture_size = 4
+window_footprint = 14 #For now, make this an even number
+aperture_size = 7
 smoothing_sigma = 0
 show_steps = False
 show_slices = False
 verbose = True
 intermediate_data = True
+make_confocal_image = True
 
 basename = os.path.splitext(data_filename)[0]
 enderlein_image_name = basename + '_enderlein_image.raw'
@@ -103,6 +103,7 @@ else:
         processed_frames = numpy.memmap(
             basename + '_frames.raw', dtype=float, mode='w+',
             shape=(steps,) + enderlein_image.shape)
+    if make_confocal_image:
         confocal_image = numpy.zeros_like(enderlein_image)
     enderlein_normalization += 1e-12
     image_data = array_illumination.load_image_data(data_filename, xPix, yPix, zPix)
@@ -175,7 +176,7 @@ else:
                     nearest_grid_point[1]-subgrid_footprint[1]:
                     nearest_grid_point[1]+subgrid_footprint[1]+1,
                     ] += 1
-                if intermediate_data:
+                if make_confocal_image:
                     confocal_image[
                         nearest_grid_point[0]-window_footprint:
                         nearest_grid_point[0]+window_footprint+1,
@@ -225,7 +226,7 @@ else:
 
     enderlein_image = enderlein_image * 1.0 / enderlein_normalization
     enderlein_image.tofile(enderlein_image_name)
-    if intermediate_data:
+    if make_confocal_image:
         confocal_image.tofile(basename + '_confocal.raw')
 fig = pylab.figure()
 pylab.imshow(enderlein_image,

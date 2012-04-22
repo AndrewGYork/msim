@@ -1,11 +1,17 @@
 import serial, time
 
 class Laser_Shutters:
-    def __init__(self):
+    def __init__(self, colors='all'):
         self.ports = {}
         self.states = {}
-        self.ports['488'] = serial.Serial(4, 9600, timeout=1)
-        self.ports['561'] = serial.Serial(5, 9600, timeout=1)
+        if colors == 'all':
+            colors = ['488', '561']
+        for c, p in (('488', 4), ('561', 5)):
+            if c in colors:
+                try:
+                    self.ports[c] = serial.Serial(p, 9600, timeout=1)
+                except:
+                    raise UserWarning("Is the " + c + " shutter on?")
         for c in self.ports.keys():
             self._robust_shut(c)
             self.states[c] = False

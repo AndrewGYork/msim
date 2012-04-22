@@ -10,6 +10,7 @@ def get_save_file():
         title=("Choose a file name and location"),
         filetypes=[('Raw binary', '.raw')],
         defaultextension='.raw',
+        initialdir='D:\\SIM_data',
         initialfile='image.raw'))) #Careful about Unicode here!
     tkroot.destroy()
     if data_file == '':
@@ -70,7 +71,7 @@ def z_t_series(
         }
     micromirrors = dmd.Micromirror_Subprocess(**micromirror_parameters)
 
-    laser_shutters = shutters.Laser_Shutters()
+    laser_shutters = shutters.Laser_Shutters(colors=colors)
     shutter_delay = 0.05 #Extra seconds we wait for the shutter to open (zero?)
     
     if z_positions[0] is not None:

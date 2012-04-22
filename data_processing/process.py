@@ -7,21 +7,19 @@ scan_type = 'dmd'
 scan_dimensions = (16, 14)
 preframes = 0
 num_harmonics = 3 #Default to 3, might have to lower to 2
-use_all_lake_parameters = True #Useful if sample-based lattice detection fails
 
 ##Don't edit below here
 ###############################################################################
-import os, glob, pprint, numpy
+import pprint
 import array_illumination
 
 (data_dir, data_filenames_list, lake_filename, background_filename
  ) = array_illumination.get_data_locations()
 
-##print "Common prefix:", os.path.commonprefix(data_filenames_list)
-##print "Stack basename:", os.path.split(os.path.commonprefix(data_filenames_list))[1]
-##raw_input()
 print "Calibration source:", lake_filename
 print "Background source:", background_filename
+
+use_all_lake_parameters = array_illumination.use_lake_parameters()
 
 """Find a set of shift vectors which characterize the illumination"""
 print "\nDetecting illumination lattice parameters..."
@@ -102,4 +100,4 @@ for f in data_filenames_list:
 array_illumination.join_enderlein_images(
     data_filenames_list,
     new_grid_xrange, new_grid_yrange,
-    join_widefield_images=True)
+    join_widefield_images=False)

@@ -1379,6 +1379,9 @@ def join_enderlein_images(
             (len(data_filenames_list), new_grid_xrange[2], new_grid_yrange[2]),
             dtype=numpy.float)
     for i, d in enumerate(data_filenames_list):
+        sys.stdout.write(
+            '\rLoading file %i of %i'%(i, len(data_filenames_list)))
+        sys.stdout.flush()
         basename = os.path.splitext(d)[0]
         enderlein_image_name = basename + '_enderlein_image.raw'
         widefield_image_name = basename + '_widefield.raw'
@@ -1391,23 +1394,24 @@ def join_enderlein_images(
                 new_grid_xrange[2], new_grid_yrange[2])
     stack_basename = os.path.commonprefix(data_filenames_list).rstrip(
         '0123456789')
-    print "Stack basename:", stack_basename
+    print "\nStack basename:", stack_basename
     enderlein_stack.tofile(stack_basename + '_enderlein_stack.raw')
-    widefield_stack.tofile(stack_basename + '_widefield_stack.raw')
+    if join_widefield_images:
+        widefield_stack.tofile(stack_basename + '_widefield_stack.raw')
+        w_notes = open(stack_basename + '_widefield_stack.txt', 'wb')
+        w_notes.write("Left/right: %i pixels\r\n"%(widefield_stack.shape[2]))
+        w_notes.write("Up/down: %i pixels\r\n"%(widefield_stack.shape[1]))
+        w_notes.write("Number of images: %i\r\n"%(widefield_stack.shape[0]))
+        w_notes.write("Data type: 64-bit real\r\n")
+        w_notes.write("Byte order: Intel (little-endian))\r\n")
+        w_notes.close()
     e_notes = open(stack_basename + '_enderlein_stack.txt', 'wb')
-    w_notes = open(stack_basename + '_widefield_stack.txt', 'wb')
     e_notes.write("Left/right: %i pixels\r\n"%(enderlein_stack.shape[2]))
     e_notes.write("Up/down: %i pixels\r\n"%(enderlein_stack.shape[1]))
     e_notes.write("Number of images: %i\r\n"%(enderlein_stack.shape[0]))
     e_notes.write("Data type: 64-bit real\r\n")
     e_notes.write("Byte order: Intel (little-endian))\r\n")
     e_notes.close()
-    w_notes.write("Left/right: %i pixels\r\n"%(widefield_stack.shape[2]))
-    w_notes.write("Up/down: %i pixels\r\n"%(widefield_stack.shape[1]))
-    w_notes.write("Number of images: %i\r\n"%(widefield_stack.shape[0]))
-    w_notes.write("Data type: 64-bit real\r\n")
-    w_notes.write("Byte order: Intel (little-endian))\r\n")
-    w_notes.close()
     print "Done joining."
     return None
 
@@ -1463,6 +1467,18 @@ def get_data_locations():
 
     tkroot.destroy()
     return data_dir, data_filenames_list, lake_filename, background_filename
+
+def use_lake_parameters():
+    import  Tkinter, tkMessageBox
+    tkroot = Tkinter.Tk()
+    tkroot.withdraw()
+    use_all_lake_parameters = tkMessageBox.askyesno(
+        default=tkMessageBox.NO,
+        icon=tkMessageBox.QUESTION,
+        message="Use lake to determine offset?\n(Useful for sparse samples)",
+        title='Offset calculation')
+    tkroot.destroy()
+    return use_all_lake_parameters
 
 if __name__ == '__main__':
     get_data_locations()

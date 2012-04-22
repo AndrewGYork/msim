@@ -20,8 +20,12 @@ class ALP:
         """Allocate the ALP high-speed device"""
         print "Allocating DMD device..."
         self.id = ctypes.c_ulong()
-        _check(DMD_api.AlpDevAlloc(
-            _ALP_DEFAULT, _ALP_DEFAULT, ctypes.byref(self.id)))
+        try:
+            _check(DMD_api.AlpDevAlloc(
+                _ALP_DEFAULT, _ALP_DEFAULT, ctypes.byref(self.id)))
+        except:
+            print "\n\n Failed to allocate the DMD. Is ALP Basic open?\n\n"
+            raise
         print " Device ID:", self.id.value
         self.seq_id = None
         return None

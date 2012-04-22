@@ -28,7 +28,9 @@ class ALP:
 
     def apply_settings(
         self, illuminate_time, picture_time=4500, trigger_delay=0,
-        illumination_filename='illumination_pattern.raw'):
+        illumination_filename='illumination_pattern.raw',
+        first_frame=None, last_frame=None, repetitions=None,
+        additional_preframes=None):
         """illuminate_time, picture_time, and trigger_delay are in
         microseconds
 
@@ -53,12 +55,34 @@ class ALP:
         illumination_pattern = numpy.fromfile(
             illumination_filename, dtype=numpy.uint8)
         num_frames = illumination_pattern.shape[0] // (nSizeX * nSizeY)
-        if num_frames * nSizeX * nSizeY == illumination_pattern.shape[0]:
-            print " Illumination pattern loaded with", num_frames, "frames."
-        else:
+        if num_frames * nSizeX * nSizeY != illumination_pattern.shape[0]:
             raise UserWarning(
                 "Illumination pattern should be a stack of %i by %i images"%(
                     nSizeX, nSizeY))
+        if first_frame == None: first_frame = 0
+        if last_frame == None: last_frame = num_frames
+        illumination_pattern = illumination_pattern.reshape(
+            num_frames, nSizeX, nSizeY)[first_frame:last_frame+1, :, :]
+        print " Illumination pattern loaded with", num_frames, "frames,",
+        print "of which we'll use", illumination_pattern.shape[0]
+        if repetitions is not None:
+            illumination_pattern_r = numpy.zeros(
+                (illumination_pattern.shape[0] * repetitions,
+                 nSizeX, nSizeY), dtype=numpy.uint8)
+            for i in range(repetitions):
+                illumination_pattern_r[i:illumination_pattern.shape[0], :, :
+                                       ] = illumination_pattern
+            illumination_pattern = illumination_pattern_r
+        if additional_preframes is not None:
+            illumination_pattern_pf = numpy.zeros(
+                (illumination_pattern.shape[0] + additional_preframes,
+                 nSizeX, nSizeY), dtype=numpy.uint8)
+            illumination_pattern_pf[additional_preframes:, :, :
+                                    ] = illumination_pattern
+            illumination_pattern = illumination_pattern_pf
+        num_frames = illumination_pattern.shape[0]
+        illumination_pattern = illumination_pattern.reshape(
+            illumination_pattern.size)
         illumination_pattern_c = numpy.ctypeslib.as_ctypes(illumination_pattern)
 
         """Allocate a sequence of binary frames"""
@@ -112,7 +136,9 @@ class ALP:
 class Micromirror_Subprocess:
     def __init__(
         self, illuminate_time, picture_time=4500, delay=0.01,
-        illumination_filename='illumination_pattern.raw'):
+        illumination_filename='illumination_pattern.raw',
+        first_frame=None, last_frame=None,
+        repetitions=None, additional_preframes=None):
         """To synchronize the DMD and the camera polling, we need two
         processes. 'delay' determines how long the DMD subprocess
         waits after a trigger message before displaying a pattern.
@@ -134,9 +160,32 @@ try:
             illuminate_time = int(raw_input())
             picture_time = int(raw_input())
             illumination_filename = raw_input()
+            first_frame = raw_input()
+            try:
+                first_frame = int(first_frame)
+            except ValueError:
+                first_frame = None
+            last_frame = raw_input()
+            try:
+                last_frame = int(last_frame)
+            except ValueError:
+                last_frame = None
+            repetitions = raw_input()
+            try:
+                repetitions = int(repetitions)
+            except ValueError:
+                repetitions = None
+            additional_preframes = raw_input()
+            try:
+                additional_preframes = int(additional_preframes)
+            except ValueError:
+                additional_preframes = None
             num_frames = micromirrors.apply_settings(
                 illuminate_time=illuminate_time, picture_time=picture_time,
-                illumination_filename=illumination_filename)
+                illumination_filename=illumination_filename,
+                first_frame=first_frame, last_frame=last_frame,
+                repetitions=repetitions,
+                additional_preframes=additional_preframes)
             sys.stdout.write(repr(int(num_frames)) + '\\n')
         else:
             time.sleep(%s) #Give the camera time to arm
@@ -155,17 +204,24 @@ except:
         for i in range(2):
             print self.subprocess.stdout.readline(),
         self.apply_settings(illuminate_time, picture_time,
-                            illumination_filename)
+                            illumination_filename,
+                            first_frame=first_frame, last_frame=last_frame)
         return None
 
     def apply_settings(self, illuminate_time, picture_time=4500, delay=None,
-                       illumination_filename='illumination_pattern.raw'):
+                       illumination_filename='illumination_pattern.raw',
+                       first_frame=None, last_frame=None,
+                       repetitions=None, additional_preframes=None):
         """delay is ignored, only here so the calling convention
         matches the other 'apply_settings'"""
         self.subprocess.stdin.write('apply_settings\n')
         self.subprocess.stdin.write(repr(illuminate_time) + '\n')
         self.subprocess.stdin.write(repr(picture_time) + '\n')
         self.subprocess.stdin.write(illumination_filename + '\n')
+        self.subprocess.stdin.write(repr(first_frame) + '\n')
+        self.subprocess.stdin.write(repr(last_frame) + '\n')
+        self.subprocess.stdin.write(repr(repetitions) + '\n')
+        self.subprocess.stdin.write(repr(additional_preframes) + '\n')
         for i in range(6):
             print self.subprocess.stdout.readline(),
         response = self.subprocess.stdout.readline()
@@ -179,6 +235,14 @@ except:
             print "\n\nSomething's wrong... is the DMD on and plugged in?"
             print "\n\nI'm looking at you, Temprine!\n\n"
             raise
+        if first_frame is not None:
+            print "First frame:", first_frame
+        if last_frame is not None:
+            print "Last frame:", last_frame
+        if repetitions is not None:
+            print "Repetitions:", repetitions
+        if additional_preframes is not None:
+            print "Additional preframes:", additional_preframes
         print "Num. images:", self.num_images
         return None
     
@@ -207,7 +271,9 @@ if __name__ == '__main__':
     for i in range(3):
         micromirrors.apply_settings(
             illuminate_time=2200, picture_time=4500,
-            illumination_filename='illumination_pattern.raw')
+            illumination_filename='illumination_pattern.raw',
+            first_frame=1, last_frame=1,
+            repetitions=20, additional_preframes=3)
         micromirrors.display_pattern()
         micromirrors.readout()
     micromirrors.close()

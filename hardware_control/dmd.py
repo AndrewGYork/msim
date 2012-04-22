@@ -158,8 +158,10 @@ except:
                             illumination_filename)
         return None
 
-    def apply_settings(self, illuminate_time, picture_time=4500,
+    def apply_settings(self, illuminate_time, picture_time=4500, delay=None,
                        illumination_filename='illumination_pattern.raw'):
+        """delay is ignored, only here so the calling convention
+        matches the other 'apply_settings'"""
         self.subprocess.stdin.write('apply_settings\n')
         self.subprocess.stdin.write(repr(illuminate_time) + '\n')
         self.subprocess.stdin.write(repr(picture_time) + '\n')

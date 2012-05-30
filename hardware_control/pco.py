@@ -2,7 +2,7 @@ import os, ctypes, time
 try:
     import numpy
 except ImportError:
-    print "Numpy could not be imported."
+    print "In pco.py, numpy could not be imported."
     print "You won't be able to use record_to_memory()."
 
 PCO_api = ctypes.oledll.LoadLibrary("SC2_Cam")
@@ -14,7 +14,7 @@ libc.fopen.restype = ctypes.c_void_p
 
 class Edge:
     def __init__(self):
-        self.camera_handle = ctypes.c_uint64() ##Assuming a 64-bit platform
+        self.camera_handle = ctypes.c_void_p()
         print "Opening camera..."
         try:
             PCO_api.PCO_OpenCamera(ctypes.byref(self.camera_handle), 0)
@@ -60,7 +60,7 @@ class Edge:
         if verbose:
             print "Reading temperatures..."
         ccdtemp, camtemp, powtemp = (
-            ctypes.c_short(), ctypes.c_short(), ctypes.c_short())
+            ctypes.c_int16(), ctypes.c_int16(), ctypes.c_int16())
         PCO_api.PCO_GetTemperature(
             self.camera_handle,
             ctypes.byref(ccdtemp), ctypes.byref(camtemp), ctypes.byref(powtemp))
@@ -156,7 +156,7 @@ class Edge:
             print " Exposure:", dwExposure.value, mode_names[wTimeBaseExposure.value]
             print " Delay:", dwDelay.value, mode_names[wTimeBaseDelay.value]
 
-        x0, y0, x1, y1 = enforce_roi(region_of_interest)
+        x0, y0, x1, y1 = enforce_roi(region_of_interest, verbose=verbose)
 
         wRoiX0, wRoiY0, wRoiX1, wRoiY1 = (
             ctypes.c_uint16(x0), ctypes.c_uint16(y0),
@@ -197,7 +197,7 @@ class Edge:
             print dwWarn.value, dwErr.value, dwStatus.value
 
         ccdtemp, camtemp, powtemp = (
-            ctypes.c_short(), ctypes.c_short(), ctypes.c_short())
+            ctypes.c_int16(), ctypes.c_int16(), ctypes.c_int16())
         PCO_api.PCO_GetTemperature(
             self.camera_handle,
             ctypes.byref(ccdtemp), ctypes.byref(camtemp), ctypes.byref(powtemp))
@@ -227,16 +227,16 @@ class Edge:
         mode; exposure time of the second image is given by the readout
         time of the first image.)
         """
-        mode_names = {0: "auto trigger",
-                      1: "software trigger",
-                      2: "external trigger/software exposure control",
-                      3: "external exposure control"}
+        trigger_mode_names = {0: "auto trigger",
+                              1: "software trigger",
+                              2: "external trigger/software exposure control",
+                              3: "external exposure control"}
         mode_name_to_number = dict((v,k) for k, v in mode_names.iteritems())
         wTriggerMode = ctypes.c_uint16()
         PCO_api.PCO_GetTriggerMode(
             self.camera_handle, ctypes.byref(wTriggerMode))
         if verbose:
-            print " Trigger mode is", mode_names[wTriggerMode.value]
+            print " Trigger mode is", trigger_mode_names[wTriggerMode.value]
 
         wStorageMode = ctypes.c_uint16()
         PCO_api.PCO_GetStorageMode(
@@ -289,14 +289,16 @@ class Edge:
             print "  From pixel", wRoiY0.value, "to pixel", wRoiY1.value, "(up/down)"
             print
 
-        trigger = mode_names[wTriggerMode.value]
-        exposure = (dwExposure.value, mode_names[wTimeBaseExposure.value])
-        roi = (wRoiX0.value, wRoiX1.value,
-               wRoiY0.value, wRoiY1.value)
+        trigger = trigger_mode_names[wTriggerMode.value]
+        """Exposure is in microseconds"""
+        exposure = dwExposure.value * 10.**(3*wTimeBaseExposure.value - 3)
+        roi = (wRoiX0.value, wRoiY0.value,
+               wRoiX1.value, wRoiY1.value)
         return (trigger, exposure, roi)
     
     def arm(self, num_buffers=2, verbose=False):
-        print "Arming camera..." 
+        if verbose:
+            print "Arming camera..." 
         PCO_api.PCO_ArmCamera(self.camera_handle)
         self.wXRes, self.wYRes, wXResMax, wYResMax = (
             ctypes.c_uint16(), ctypes.c_uint16(),
@@ -314,7 +316,7 @@ class Edge:
         for i in range(num_buffers):
             self.buffer_numbers.append(ctypes.c_int16(-1))
             self.buffer_pointers.append(ctypes.c_void_p(0))
-            self.buffer_events.append(ctypes.c_ulong(0))
+            self.buffer_events.append(ctypes.c_void_p(0))
             PCO_api.PCO_AllocateBuffer(
                 self.camera_handle, ctypes.byref(self.buffer_numbers[i]),
                 dwSize, ctypes.byref(self.buffer_pointers[i]),
@@ -329,12 +331,24 @@ class Edge:
             self.camera_handle, self.wXRes, self.wYRes)
 
         wRecState = ctypes.c_uint16(1)
+        message = PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
+        if verbose:
+            print "Recording state return value:", message
+        return None
+
+    def disarm(self, verbose=True):
+        wRecState = ctypes.c_uint16(0) #Turn off recording
         PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
+        for buf in self.buffer_numbers: #Free any allocated buffers
+            PCO_api.PCO_FreeBuffer(self.camera_handle, buf)
+        self.buffer_numbers, self.buffer_pointers, self.buffer_events = (
+            [], [], [])
         return None
 
     def record_to_file(
         self, num_images, preframes=0,
-        file_name='image.raw', save_path=None, verbose=False):
+        file_name='image.raw', save_path=None, verbose=False,
+        poll_timeout=5e5):
         """Call this any number of times, after arming the camera once"""
 
         if save_path is None:
@@ -342,7 +356,7 @@ class Edge:
         save_path = str(save_path)
 
         dw1stImage, dwLastImage = ctypes.c_uint32(0), ctypes.c_uint32(0)
-        wBitsPerPixel = ctypes.c_uint16(14) #14 bits for the pco.edge, right?
+        wBitsPerPixel = ctypes.c_uint16(16) #16 bits for the pco.edge, right?
         dwStatusDll, dwStatusDrv = ctypes.c_uint32(), ctypes.c_uint32()
         print "Saving:", repr(os.path.join(save_path, file_name))
         file_pointer = ctypes.c_void_p(
@@ -368,9 +382,9 @@ class Edge:
                         print "After", num_polls, "polls, buffer",
                         print self.buffer_numbers[which_buf].value, "is ready."
                     break
-                if num_polls > 5e5:
+                if num_polls > poll_timeout:
                     libc.fclose(file_pointer)
-                    raise UserWarning("After half a  million polls, no buffer.")
+                    raise UserWarning("After %i polls, no buffer."%poll_timeout)
 
             if which_im >= preframes:
                 response = libc.fwrite(
@@ -397,7 +411,7 @@ class Edge:
 
     def _prepare_to_record_to_memory(self):
         dw1stImage, dwLastImage = ctypes.c_uint32(0), ctypes.c_uint32(0)
-        wBitsPerPixel = ctypes.c_uint16(14) #14 bits for the pco.edge, right?
+        wBitsPerPixel = ctypes.c_uint16(16) #16 bits for the pco.edge, right?
         dwStatusDll, dwStatusDrv = ctypes.c_uint32(), ctypes.c_uint32()
         bytes_per_pixel = ctypes.c_uint32(2)
         pixels_per_image = ctypes.c_uint32(self.wXRes.value * self.wYRes.value)
@@ -416,7 +430,8 @@ class Edge:
         return None
 
     def record_to_memory(
-        self, num_images, preframes=0, verbose=False, out=None):
+        self, num_images, preframes=0, verbose=False, out=None,
+        poll_timeout=5e5):
         """Call this any number of times, after arming the camera once"""
 
         if not hasattr(self, '_prepared_to_record'):
@@ -430,7 +445,7 @@ class Edge:
 
         if out is None:
             assert bytes_per_pixel.value == 2
-            out = numpy.zeros(
+            out = numpy.ones(
                 (num_images, self.wYRes.value, self.wXRes.value),
                 dtype=numpy.uint16)
         else:
@@ -439,7 +454,7 @@ class Edge:
                     num_images, self.wYRes.value, self.wXRes.value)
             except AssertionError:
                 print out.shape
-                print (num_images, self.wYRes, self.wXRes)
+                print (num_images, self.wYRes.value, self.wXRes.value)
                 raise UserWarning(
                     "Input argument 'out' must have dimensions:\n" +
                     "(num_images, y-resolution, x-resolution)")
@@ -456,7 +471,7 @@ class Edge:
             num_polls = 0
             while True:
                 num_polls += 1
-                PCO_api.PCO_GetBufferStatus(
+                message = PCO_api.PCO_GetBufferStatus(
                     self.camera_handle, self.buffer_numbers[which_buf],
                     ctypes.byref(dwStatusDll), ctypes.byref(dwStatusDrv))
                 time.sleep(0.00005) #50 microseconds
@@ -465,8 +480,21 @@ class Edge:
                         print "After", num_polls, "polls, buffer",
                         print self.buffer_numbers[which_buf].value, "is ready."
                     break
-                if num_polls > 5e5:
-                    raise UserWarning("After half a  million polls, no buffer.")
+                if num_polls > poll_timeout:
+                    raise TimeoutError(
+                        "After %i polls, no buffer."%(poll_timeout))
+
+            if dwStatusDrv.value == 0x0L:
+                pass
+            elif dwStatusDrv.value == 0x80332028:
+                raise DMAError('DMA error during record_to_memory')
+            else:
+                print "dwStatusDrv:", dwStatusDrv.value
+                raise UserWarning("Buffer status error")
+
+            if verbose:
+                print "Record to memory result:",
+                print hex(dwStatusDll.value), hex(dwStatusDrv.value), message
 
             if which_im >= preframes:
                 buf = buffer_from_memory(self.buffer_pointers[which_buf],
@@ -485,8 +513,22 @@ class Edge:
         print "Camera closed."
         return None
 
-def enforce_roi(region_of_interest):
-    x0, y0, x1, y1 = region_of_interest
+class TimeoutError(Exception):
+    def __init__(self, value):
+        self.value = value
+    def __str__(self):
+        return repr(self.value)
+
+class DMAError(Exception):
+    def __init__(self, value):
+        self.value = value
+    def __str__(self):
+        return repr(self.value)
+
+def enforce_roi(region_of_interest, verbose):
+    x0, y0, x1, y1 = tuple(region_of_interest)
+    if verbose:
+        print "ROI requested:", x0, y0, x1, y1
     if x0 < 1:
         x0 = 1 #Min value
     if x0 > 2401:
@@ -502,6 +544,8 @@ def enforce_roi(region_of_interest):
     if y0 > 1073:
         y0 = 1073
     y1 = 2161 - y0
+    if verbose:
+        print "Nearest possible ROI:", x0, y0, x1, y1
     return (x0, y0, x1, y1)
 
 """
@@ -533,29 +577,29 @@ if __name__ == "__main__":
     import time, numpy
     times = []
     camera = Edge()
-    camera.apply_settings(verbose=False)
+    camera.apply_settings(region_of_interest=(641, 841, 1440, 1320))
     camera.get_settings(verbose=False)
     camera.arm()
-##    for i in range(3):
+##    for i in range(100):
 ##        times.append(time.clock())
-##        camera.record_to_file(num_images=120, file_name='%06i.raw'%(i))
+##        camera.record_to_file(num_images=1, file_name='%06i.raw'%(i))
 ##    camera.close()
-    for i in range(10):
+    for i in range(1000):
         times.append(time.clock())
         images = camera.record_to_memory(num_images=1)
     camera.close()
-##    import pylab
-##    pylab.close('all')
-##    fig = pylab.figure()
-##    pylab.plot(1000*numpy.diff(times), '.-')
-##    pylab.ylabel('milliseconds')
-##    pylab.xlabel('Frame #')
-##    pylab.title('Camera response time')
-##    pylab.grid()
-##    fig.show()
-##    fig.canvas.draw()
-##
-##    fig = pylab.figure()
-##    pylab.imshow(images[-1, :, :], cmap=pylab.cm.gray, interpolation='nearest')
-##    fig.show()
-##    fig.canvas.draw()
+    import pylab
+    pylab.close('all')
+    fig = pylab.figure()
+    pylab.plot(1000*numpy.diff(times), '.-')
+    pylab.ylabel('milliseconds')
+    pylab.xlabel('Frame #')
+    pylab.title('Camera response time')
+    pylab.grid()
+    fig.show()
+    fig.canvas.draw()
+
+    fig = pylab.figure()
+    pylab.imshow(images[-1, :, :], cmap=pylab.cm.gray, interpolation='nearest')
+    fig.show()
+    fig.canvas.draw()

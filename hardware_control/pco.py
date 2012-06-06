@@ -25,16 +25,14 @@ class Edge:
         PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
         print " Camera handle:", self.camera_handle.value
         self.buffer_numbers = []
+        self.armed = False
         return None
 
     def apply_settings(
         self, trigger='auto trigger', exposure_time_microseconds=2200,
         region_of_interest=(961, 841, 1440, 1320), verbose=True):
-        wRecState = ctypes.c_uint16(0) #Turn off recording
-        PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
-        for buf in self.buffer_numbers: #Free any allocated buffers
-            PCO_api.PCO_FreeBuffer(self.camera_handle, buf)
-
+        
+        self.disarm(verbose=verbose)
         PCO_api.PCO_ResetSettingsToDefault(self.camera_handle)
 
         wSensor = ctypes.c_uint16(0)
@@ -297,6 +295,8 @@ class Edge:
         return (trigger, exposure, roi)
     
     def arm(self, num_buffers=2, verbose=False):
+        if self.armed:
+            raise UserWarning('The pco.edge camera is already armed.')
         if verbose:
             print "Arming camera..." 
         PCO_api.PCO_ArmCamera(self.camera_handle)
@@ -334,15 +334,18 @@ class Edge:
         message = PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
         if verbose:
             print "Recording state return value:", message
+        self.armed = True
         return None
 
     def disarm(self, verbose=True):
         wRecState = ctypes.c_uint16(0) #Turn off recording
         PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
+        PCO_api.PCO_RemoveBuffer(self.camera_handle)
         for buf in self.buffer_numbers: #Free any allocated buffers
             PCO_api.PCO_FreeBuffer(self.camera_handle, buf)
         self.buffer_numbers, self.buffer_pointers, self.buffer_events = (
             [], [], [])
+        self.armed = False
         return None
 
     def record_to_file(
@@ -584,22 +587,41 @@ if __name__ == "__main__":
 ##        times.append(time.clock())
 ##        camera.record_to_file(num_images=1, file_name='%06i.raw'%(i))
 ##    camera.close()
+    print "Acquiring..."
     for i in range(1000):
         times.append(time.clock())
         images = camera.record_to_memory(num_images=1)
+    times.append(time.clock())
     camera.close()
-    import pylab
-    pylab.close('all')
-    fig = pylab.figure()
-    pylab.plot(1000*numpy.diff(times), '.-')
-    pylab.ylabel('milliseconds')
-    pylab.xlabel('Frame #')
-    pylab.title('Camera response time')
-    pylab.grid()
-    fig.show()
-    fig.canvas.draw()
 
-    fig = pylab.figure()
-    pylab.imshow(images[-1, :, :], cmap=pylab.cm.gray, interpolation='nearest')
-    fig.show()
-    fig.canvas.draw()
+    try:
+        import matplotlib
+        matplotlib.use('TkAgg')
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
+        from matplotlib.figure import Figure
+        import Tkinter as Tk
+        root = Tk.Tk()
+        root.wm_title("Performance")
+        f = Figure(figsize=(5,4), dpi=100)
+        a = f.add_subplot(111)
+        a.plot(1000*numpy.diff(times), '.-')
+        a.set_ylabel('milliseconds')
+        a.set_xlabel('Frame #')
+        a.grid()
+        canvas = FigureCanvasTkAgg(f, master=root)
+        canvas.show()
+        canvas.get_tk_widget().pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
+        toolbar = NavigationToolbar2TkAgg( canvas, root )
+        toolbar.update()
+        canvas._tkcanvas.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
+        def _quit():
+            root.quit()     # stops mainloop
+            root.destroy()  # this is necessary on Windows to prevent
+                            # Fatal Python Error: PyEval_RestoreThread: NULL tstate
+        button = Tk.Button(master=root, text='Quit', command=_quit)
+        button.pack(side=Tk.BOTTOM)
+        Tk.mainloop()
+        # If you put root.destroy() here, it will cause an error if
+        # the window is closed with the window manager.
+    except:
+        pass ##

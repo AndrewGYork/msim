@@ -418,22 +418,25 @@ class Edge:
         dwStatusDll, dwStatusDrv = ctypes.c_uint32(), ctypes.c_uint32()
         bytes_per_pixel = ctypes.c_uint32(2)
         pixels_per_image = ctypes.c_uint32(self.wXRes.value * self.wYRes.value)
+        added_buffers = []
+        for which_buf in range(len(self.buffer_numbers)):
+            PCO_api.PCO_AddBufferEx(
+                self.camera_handle, dw1stImage, dwLastImage,
+                self.buffer_numbers[which_buf], self.wXRes, self.wYRes,
+                wBitsPerPixel)
+            added_buffers.append(which_buf)
         """
         Gibberish below courtesy of:
         http://stackoverflow.com/questions/4355524/getting-data-from-ctypes-array-into-numpy
         """
         buffer_from_memory = ctypes.pythonapi.PyBuffer_FromMemory
         buffer_from_memory.restype = ctypes.py_object
-        for which_buf in range(len(self.buffer_numbers)):
-            PCO_api.PCO_AddBufferEx(
-                self.camera_handle, dw1stImage, dwLastImage,
-                self.buffer_numbers[which_buf], self.wXRes, self.wYRes,
-                wBitsPerPixel)
         self._prepared_to_record = (
             dw1stImage, dwLastImage,
             wBitsPerPixel,
             dwStatusDll, dwStatusDrv,
             bytes_per_pixel, pixels_per_image,
+            added_buffers,
             buffer_from_memory)
         return None
 
@@ -448,6 +451,7 @@ class Edge:
          wBitsPerPixel,
          dwStatusDll, dwStatusDrv,
          bytes_per_pixel, pixels_per_image,
+         added_buffers,
          buffer_from_memory
          ) = self._prepared_to_record
 
@@ -469,28 +473,27 @@ class Edge:
             except AttributeError:
                 raise UserWarning("Input argument 'out' must be a numpy array.")
 
-        buf_nums = range(len(self.buffer_numbers))
         for which_im in range(num_images):
             num_polls = 0
             polling = True
             while polling:
                 num_polls += 1
-                for which_buf in buf_nums:
-                    message = PCO_api.PCO_GetBufferStatus(
-                        self.camera_handle, self.buffer_numbers[which_buf],
-                        ctypes.byref(dwStatusDll), ctypes.byref(dwStatusDrv))
-                    if dwStatusDll.value == 0xc0008000:
-                        if verbose:
-                            print "After", num_polls, "polls, buffer",
-                            print self.buffer_numbers[which_buf].value,
-                            print "is ready."
-                        polling = False
-                        break
-                    else:
-                        time.sleep(0.00005) #Wait 50 microseconds
-                    if num_polls > poll_timeout:
-                        raise TimeoutError(
-                            "After %i polls, no buffer."%(poll_timeout))
+                message = PCO_api.PCO_GetBufferStatus(
+                    self.camera_handle, self.buffer_numbers[added_buffers[0]],
+                    ctypes.byref(dwStatusDll), ctypes.byref(dwStatusDrv))
+                if dwStatusDll.value == 0xc0008000:
+                    which_buf = added_buffers.pop(0) #Buffer exits the queue                        
+                    if verbose:
+                        print "After", num_polls, "polls, buffer",
+                        print self.buffer_numbers[which_buf].value,
+                        print "is ready."
+                    polling = False
+                    break
+                else:
+                    time.sleep(0.00005) #Wait 50 microseconds
+                if num_polls > poll_timeout:
+                    raise TimeoutError(
+                        "After %i polls, no buffer."%(poll_timeout))
             if dwStatusDrv.value == 0x0L:
                 pass
             elif dwStatusDrv.value == 0x80332028:
@@ -513,6 +516,7 @@ class Edge:
                 self.camera_handle, dw1stImage, dwLastImage,
                 self.buffer_numbers[which_buf], self.wXRes, self.wYRes,
                 wBitsPerPixel)
+            added_buffers.append(which_buf)
         return out
 
     def close(self):
@@ -591,13 +595,14 @@ if __name__ == "__main__":
     camera = Edge()
     camera.apply_settings(region_of_interest=(641, 841, 1440, 1320))
     camera.get_settings(verbose=False)
-    camera.arm()
+    camera.arm(num_buffers=3)
+    camera._prepare_to_record_to_memory()
 ##    for i in range(100):
 ##        times.append(time.clock())
 ##        camera.record_to_file(num_images=1, file_name='%06i.raw'%(i))
 ##    camera.close()
     print "Acquiring..."
-    for i in range(1000):
+    for i in range(100):
         times.append(time.clock())
         images = camera.record_to_memory(num_images=1, verbose=False)
     times.append(time.clock())

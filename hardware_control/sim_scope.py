@@ -1,5 +1,5 @@
 import os, time, re, string
-import pco, dmd, stage, shutters, wheel
+import pco, dmd, stage, shutters, wheel, gooch
 import numpy
 
 def get_save_file():
@@ -137,6 +137,8 @@ def z_t_series(
         colors=[c[0] for c in colors],
         pause_after_open=0.75) ##Seconds we wait after shutter opens (vibration)
 
+    aotf = gooch.AOTF()
+
     filter_wheel = wheel.Filter_Wheel(initial_position=colors[0][1])
     
     if z_positions[0] is not None:
@@ -222,6 +224,7 @@ def z_t_series(
         raise
     finally:
         laser_shutters.close()
+        aotf.close()
         filter_wheel.close()
         camera.close()
         micromirrors.close()
@@ -267,25 +270,27 @@ if __name__ == '__main__':
 ##        pattern='sim',
 ##        colors=[('488', 'f3')]
 ##        )
-
-    filenames, t_points, z_points = z_t_series(
-        time_delays=[20]*30,
-##        z_positions=[0, 0, 0, 0],
-        z_positions=range(-25, 20, 2),
-        repetition_period_microseconds='4500',
-##        illumination_microseconds=100, #important for widefield
-        pattern='sim',
-        colors=[('488', 'f1'), ('561', 'f3')]
-        )
+##
 
 ##    filenames, t_points, z_points = z_t_series(
 ##        time_delays=[None],
 ####        z_positions=[0, 0, 0, 0],
-##        z_positions=range(20, 30, 1),
-##        repetition_period_microseconds='4500',
-####        illumination_microseconds=1200, #important for widefield
+##        z_positions=range(-20, 30, 2),
+##        repetition_period_microseconds='9000',
+####        illumination_microseconds=100, #important for widefield
 ##        pattern='sim',
-##        colors=[('488', 'f2')]
+##        colors=[('488', 'f1')]
 ##        )
+
+    filenames, t_points, z_points = z_t_series(
+        time_delays=[1]*2,
+##        z_positions=[0, 0, 0, 0],
+        z_positions=range(-5, 5, 1),
+        repetition_period_microseconds='4500',
+##        illumination_microseconds=1200, #important for widefield
+      pattern='sim',
+        colors=[('488', 'f1'), ('561', 'f3')]
+      )
+
 
     

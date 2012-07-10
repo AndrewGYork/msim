@@ -88,11 +88,12 @@ class Edge:
         mode; exposure time of the second image is given by the readout
         time of the first image.)
         """
-        mode_names = {0: "auto trigger",
+        trigger_mode_names = {0: "auto trigger",
                       1: "software trigger",
                       2: "external trigger/software exposure control",
                       3: "external exposure control"}
-        mode_name_to_number = dict((v,k) for k, v in mode_names.iteritems())
+        mode_name_to_number = dict(
+            (v,k) for k, v in trigger_mode_names.iteritems())
         if verbose:
             print "Setting trigger mode..."
         wTriggerMode = ctypes.c_uint16(mode_name_to_number[trigger])
@@ -100,7 +101,7 @@ class Edge:
         PCO_api.PCO_GetTriggerMode(
             self.camera_handle, ctypes.byref(wTriggerMode))
         if verbose:
-            print " Trigger mode is", mode_names[wTriggerMode.value]
+            print " Trigger mode is", trigger_mode_names[wTriggerMode.value]
 
         wStorageMode = ctypes.c_uint16()
         PCO_api.PCO_GetStorageMode(
@@ -174,7 +175,13 @@ class Edge:
 
         if hasattr(self, '_prepared_to_record'):
             del self._prepared_to_record
-        return None
+
+        trigger = trigger_mode_names[wTriggerMode.value]
+        """Exposure is in microseconds"""
+        exposure = dwExposure.value * 10.**(3*wTimeBaseExposure.value - 3)
+        roi = (wRoiX0.value, wRoiY0.value,
+               wRoiX1.value, wRoiY1.value)
+        return (trigger, exposure, roi)
 
     def get_settings(self, verbose=True):
         if verbose:

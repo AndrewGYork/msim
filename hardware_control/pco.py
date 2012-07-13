@@ -480,6 +480,7 @@ class Edge:
             except AttributeError:
                 raise UserWarning("Input argument 'out' must be a numpy array.")
 
+        num_acquired = 0
         for which_im in range(num_images):
             num_polls = 0
             polling = True
@@ -500,7 +501,8 @@ class Edge:
                     time.sleep(0.00005) #Wait 50 microseconds
                 if num_polls > poll_timeout:
                     raise TimeoutError(
-                        "After %i polls, no buffer."%(poll_timeout))
+                        "After %i polls, no buffer."%(poll_timeout),
+                        num_acquired=num_acquired)
             if dwStatusDrv.value == 0x0L:
                 pass
             elif dwStatusDrv.value == 0x80332028:
@@ -518,6 +520,7 @@ class Edge:
                                          2*(out.shape[1]*out.shape[2]))
                 out[which_im - preframes, :, :] = numpy.frombuffer(
                     buf, numpy.uint16).reshape(out.shape[1:])
+                num_acquired += 1
 
             PCO_api.PCO_AddBufferEx(#Put the buffer back in the queue
                 self.camera_handle, dw1stImage, dwLastImage,
@@ -526,19 +529,17 @@ class Edge:
             added_buffers.append(which_buf)
         return out
 
-    def close(self):
+    def close(self, verbose=True):
         print "Ending recording..."
-        wRecState = ctypes.c_uint16(0)
-        PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
-        for buf in self.buffer_numbers:
-            PCO_api.PCO_FreeBuffer(self.camera_handle, buf)
+        self.disarm(verbose=verbose)
         PCO_api.PCO_CloseCamera(self.camera_handle)
         print "Camera closed."
         return None
 
 class TimeoutError(Exception):
-    def __init__(self, value):
+    def __init__(self, value, num_acquired=0):
         self.value = value
+        self.num_acquired = num_acquired
     def __str__(self):
         return repr(self.value)
 

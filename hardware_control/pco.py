@@ -48,12 +48,15 @@ class Edge:
             print "Getting camera health status..."
         dwWarn, dwErr, dwStatus = (
             ctypes.c_uint32(), ctypes.c_uint32(), ctypes.c_uint32())
-        PCO_api.PCO_GetCameraHealthStatus(
+        response = PCO_api.PCO_GetCameraHealthStatus(
             self.camera_handle,
             ctypes.byref(dwWarn), ctypes.byref(dwErr), ctypes.byref(dwStatus))
         if verbose:
             print " Camera health status (0 0 0 means healthy):",
             print dwWarn.value, dwErr.value, dwStatus.value
+        if dwWarn.value != 0 or dwErr.value != 0 or dwStatus.value != 0:
+            raise UserWarning("Camera unhealthy: %x %x %x %i"%(
+                dwWarn.value, dwErr.value, dwStatus.value, response))
 
         if verbose:
             print "Reading temperatures..."
@@ -528,6 +531,52 @@ class Edge:
                 wBitsPerPixel)
             added_buffers.append(which_buf)
         return out
+
+    def _set_hw_io_ch4_to_global_exposure(self, verbose=True):
+        class HWIOSignalTimingStructureIn(ctypes.Structure):
+                        _fields_ = [("code", ctypes.c_uint16),
+                                    ("length", ctypes.c_uint16),
+                                    ("index", ctypes.c_uint16),
+                                    ("select", ctypes.c_uint16),
+                                    ("parameter", ctypes.c_uint32),
+                                    ("Reserved0", ctypes.c_uint32),
+                                    ("Reserved1", ctypes.c_uint32),
+                                    ("Reserved2", ctypes.c_uint32),
+                                    ("Reserved3", ctypes.c_uint32),
+                                    ("checksum", ctypes.c_uint8)]
+
+        class HWIOSignalTimingStructureOut(ctypes.Structure):
+                        _fields_ = [("code", ctypes.c_uint16),
+                                    ("length", ctypes.c_uint16),
+                                    ("index", ctypes.c_uint16),
+                                    ("select", ctypes.c_uint16),
+                                    ("type", ctypes.c_uint32),
+                                    ("parameter", ctypes.c_uint32),
+                                    ("Reserved0", ctypes.c_uint32),
+                                    ("Reserved1", ctypes.c_uint32),
+                                    ("Reserved2", ctypes.c_uint32),
+                                    ("Reserved3", ctypes.c_uint32),
+                                    ("checksum", ctypes.c_uint8)]
+        message = HWIOSignalTimingStructureIn()
+        response = HWIOSignalTimingStructureOut()
+
+        message.code = 0x2712;          ## Set HWIO Signal Timing command
+        message.length = 0x001D;        ## Add up all the bytes, 29 in total
+        message.index = 0x0003;         ## Fourth signal (0 - 3) is exposure out
+        message.select = 0x0000;        ## Function as Exposure Output
+        message.parameter = 0x00000002; ## 1 for rolling ; 2 for global
+        response.length = 0x0021;
+
+        if verbose:
+            print "Setting hardware I/O signal..."
+        PCO_api.PCO_ControlCommandCall(self.camera_handle,
+                                       ctypes.byref(message), message.length,
+                                       ctypes.byref(response), response.length)
+        if verbose:
+            print "Index:", response.index
+            print "Type:", response.type, "(if 7, rolling shutter exposure)"
+            print "Parameter:", response.parameter
+        return None
 
     def close(self, verbose=True):
         print "Ending recording..."

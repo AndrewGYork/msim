@@ -35,7 +35,7 @@ class DAQ:
         return None
 
     def set_voltage_and_timing(
-        self, voltage, rate, repetitions, voltage_limits=None):
+        self, voltage, rate, repetitions=1, voltage_limits=None):
         if voltage_limits == None: #Use +/-10 V as the default
             voltage_limits = {
                 0: 10,

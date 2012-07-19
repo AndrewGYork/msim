@@ -76,7 +76,7 @@ class ALP:
         if repetitions is not None:
             illumination_pattern_r = numpy.zeros(
                 (illumination_pattern.shape[0] * repetitions,
-                 nSizeX, nSizeY), dtype=numpy.uint8)
+                 nSizeY, nSizeX), dtype=numpy.uint8)
             for i in range(repetitions):
                 illumination_pattern_r[i:illumination_pattern.shape[0]+i, :, :
                                        ] = illumination_pattern
@@ -84,7 +84,7 @@ class ALP:
         if additional_preframes is not None:
             illumination_pattern_pf = numpy.zeros(
                 (illumination_pattern.shape[0] + additional_preframes,
-                 nSizeX, nSizeY), dtype=numpy.uint8)
+                 nSizeY, nSizeX), dtype=numpy.uint8)
             illumination_pattern_pf[additional_preframes:, :, :
                                     ] = illumination_pattern
             illumination_pattern = illumination_pattern_pf

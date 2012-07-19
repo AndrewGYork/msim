@@ -56,19 +56,23 @@ class ALP:
                 "What kind of DMD have you got plugged in there, son?")
 
         """Load the illumination pattern from disk"""
-        illumination_pattern = numpy.fromfile(
-            illumination_filename, dtype=numpy.uint8)
+        bytes_per_pix = 1
+        f = open(illumination_filename, 'rb')
+        if first_frame == None: first_frame = 0
+        if last_frame == None:
+            count = -1
+        else:
+            count = (1 + last_frame - first_frame)*bytes_per_pix*nSizeX*nSizeY
+        f.seek(first_frame * bytes_per_pix * nSizeX * nSizeY)
+        illumination_pattern = numpy.fromfile(f, dtype=numpy.uint8, count=count)
         num_frames = illumination_pattern.shape[0] // (nSizeX * nSizeY)
         if num_frames * nSizeX * nSizeY != illumination_pattern.shape[0]:
             raise UserWarning(
                 "Illumination pattern should be a stack of %i by %i images"%(
                     nSizeX, nSizeY))
-        if first_frame == None: first_frame = 0
-        if last_frame == None: last_frame = num_frames
         illumination_pattern = illumination_pattern.reshape(
-            num_frames, nSizeY, nSizeX)[first_frame:last_frame+1, :, :]
-        print " Illumination pattern loaded with", num_frames, "frames,",
-        print "of which we'll use", illumination_pattern.shape[0]
+            num_frames, nSizeY, nSizeX)
+        print " Illumination pattern loaded with", num_frames, "frames"
         if repetitions is not None:
             illumination_pattern_r = numpy.zeros(
                 (illumination_pattern.shape[0] * repetitions,

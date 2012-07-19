@@ -66,7 +66,7 @@ class ALP:
         if first_frame == None: first_frame = 0
         if last_frame == None: last_frame = num_frames
         illumination_pattern = illumination_pattern.reshape(
-            num_frames, nSizeX, nSizeY)[first_frame:last_frame+1, :, :]
+            num_frames, nSizeY, nSizeX)[first_frame:last_frame+1, :, :]
         print " Illumination pattern loaded with", num_frames, "frames,",
         print "of which we'll use", illumination_pattern.shape[0]
         if repetitions is not None:

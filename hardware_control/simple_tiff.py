@@ -45,8 +45,6 @@ def array_to_tiff(a, outfile='out.tif'):
     else:
         next_ifd_offset[0] = strip_offset[0] + a.nbytes
 
-    print next_ifd_offset
-
     f = open(outfile, 'wb')
     f.write('II*\x00\x08\x00\x00\x00')
     header.tofile(f)

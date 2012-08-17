@@ -35,7 +35,9 @@ def array_to_tiff(a, outfile='out.tif'):
     """
     width[0] = x
     length[0] = y
-    image_description = 'ImageJ=1.45s\nimages=%i\nslices=%i\nloop=false\nmin=0.0\nmax=65535.0\n\x00'%(z, z)
+    image_description = ''.join((
+        'ImageJ=1.45s\nimages=%i\nslices=%i\n'%(z, z),
+        'loop=false\nmin=%0.3f\nmax=%0.3f\n\x00'%(a.min(), a.max())))
     num_chars_in_image_description[0] = len(image_description)
     strip_offset[0] = 8 + header.nbytes + len(image_description)
     rows_per_strip[0] = y

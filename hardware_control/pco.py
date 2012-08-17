@@ -451,7 +451,8 @@ class Edge:
         return None
 
     def record_to_memory(
-        self, num_images, preframes=0, verbose=False, out=None,
+        self, num_images, preframes=0, verbose=False,
+        out=None, first_frame=0,
         poll_timeout=5e5):
         """Call this any number of times, after arming the camera once"""
 
@@ -466,20 +467,22 @@ class Edge:
          ) = self._prepared_to_record
 
         if out is None:
+            first_frame = 0
             assert bytes_per_pixel.value == 2
             out = numpy.ones(
                 (num_images, self.wYRes.value, self.wXRes.value),
                 dtype=numpy.uint16)
         else:
             try:
-                assert out.shape == (
-                    num_images, self.wYRes.value, self.wXRes.value)
+                assert out.shape[1:] == (
+                    self.wYRes.value, self.wXRes.value)
+                assert out.shape[0] >= num_images
             except AssertionError:
                 print out.shape
                 print (num_images, self.wYRes.value, self.wXRes.value)
                 raise UserWarning(
                     "Input argument 'out' must have dimensions:\n" +
-                    "(num_images, y-resolution, x-resolution)")
+                    "(>=num_images, y-resolution, x-resolution)")
             except AttributeError:
                 raise UserWarning("Input argument 'out' must be a numpy array.")
 
@@ -521,8 +524,9 @@ class Edge:
             if which_im >= preframes:
                 buf = buffer_from_memory(self.buffer_pointers[which_buf],
                                          2*(out.shape[1]*out.shape[2]))
-                out[which_im - preframes, :, :] = numpy.frombuffer(
-                    buf, numpy.uint16).reshape(out.shape[1:])
+                out[(first_frame + (which_im - preframes))%out.shape[0],
+                    :, :] = numpy.frombuffer(
+                        buf, numpy.uint16).reshape(out.shape[1:])
                 num_acquired += 1
 
             PCO_api.PCO_AddBufferEx(#Put the buffer back in the queue
@@ -531,6 +535,77 @@ class Edge:
                 wBitsPerPixel)
             added_buffers.append(which_buf)
         return out
+
+    def get_shutter_mode(self, verbose=True):
+        if verbose:
+            print "Getting shutter mode..."
+        wType = ctypes.c_uint16(0)
+        dwSetup = (ctypes.c_uint32 * 4)() #An array
+        wLen = ctypes.c_uint16(4)
+        PCO_api.PCO_GetCameraSetup(self.camera_handle,
+                                   ctypes.byref(wType),
+                                   dwSetup, #Array gets passed by reference
+                                   ctypes.byref(wLen))
+        if verbose:
+            print "Type:", wType.value
+            print "Length:", wLen.value
+        if dwSetup[0] == 1:
+            mode = 'rolling'
+        elif dwSetup[0] == 2:
+            mode = 'global'
+        else:
+            raise UserWarning("Shutter mode not understood")
+        if verbose:
+            print " Shutter mode:", mode
+        return mode
+
+    def set_shutter_mode(self, mode='rolling', verbose=True):
+        ###DOESN'T WORK YET
+        assert mode in ('global', 'rolling')
+        if verbose:
+            print "Setting shutter mode..."
+        old_mode = self.get_shutter_mode(verbose=False)
+        if mode == old_mode:
+            if verbose:
+                print " Already in", mode, "shutter mode."
+            return None
+        else:
+            if verbose:
+                print " Changing from", old_mode, "to", mode, "shutter."
+        wType = ctypes.c_uint16(0)
+        dwSetup = (ctypes.c_uint32 * 10)() #An array
+        wLen = ctypes.c_uint16(10)
+        PCO_api.PCO_SetCameraSetup(self.camera_handle,
+                                   wType,
+                                   dwSetup, #Array gets passed by reference
+                                   wLen)
+        if dwSetup[0] == 1:
+            new_mode = 'rolling'
+        elif dwSetup[0] == 2:
+            new_mode = 'global'
+        else:
+            raise UserWarning("Shutter mode not understood")
+        if verbose:
+            print " Shutter mode set to:", new_mode
+            print " Rebooting camera",
+        PCO_api.PCO_Reboot_Camera(self.camera_handle)
+        for i in range(10):
+            if verbose:
+                print '.',
+            try:
+                PCO_api.PCO_OpenCamera(ctypes.byref(self.camera_handle), 0)
+                break
+            except WindowsError:
+                if i >= 9:
+                    raise
+        if verbose:
+            print
+            print " Camera rebooted."
+        wRecState = ctypes.c_uint16(0) #Turn off recording
+        PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
+        self.buffer_numbers = []
+        self.armed = False
+        return mode
 
     def _set_hw_io_ch4_to_global_exposure(self, verbose=True):
         class HWIOSignalTimingStructureIn(ctypes.Structure):
@@ -651,6 +726,8 @@ if __name__ == "__main__":
     times = []
     camera = Edge()
     camera.apply_settings(region_of_interest=(641, 841, 1440, 1320))
+    camera.get_shutter_mode()
+##    camera.set_shutter_mode('global')
     camera.get_settings(verbose=False)
     camera.arm(num_buffers=3)
     camera._prepare_to_record_to_memory()

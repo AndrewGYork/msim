@@ -9,7 +9,7 @@ error, read NIDAQmx.h to decypher it."""
 
 class DAQ:
     def __init__(
-        self, voltage={0:[1]}, rate=500, repetitions=1,
+        self, voltage={0:(0, 0)}, rate=500, repetitions=1,
         board_name='cDAQ1Mod1', voltage_limits=None):
         """'voltage' should be a dict of numpy arrays of
         floating-point numbers. The keys of 'voltage' are integers,
@@ -45,7 +45,7 @@ class DAQ:
         num_points = -1
         for k in range(4):
             if k in voltage:
-                v = voltage[k]
+                v = numpy.asarray(voltage[k])
                 if v.max() - v.min() > voltage_limits[k]:
                     raise UserWarning(
                         "Voltage signal amplitude exceeds voltage limits.")
@@ -182,24 +182,42 @@ if __name__ == '__main__':
 ##        repetitions=2))
 ##    fig.show()
 
-    points_per_period = 1000
     voltage = {}
-##    from scipy.ndimage import gaussian_filter
+    rate = 100000
+##    points_per_period = 1000
 ##    voltage[0] = 0.0024 + 0.4*gaussian_filter(
 ##        square(points_per_period), sigma=points_per_period*.01, mode='wrap')
-    voltage[0] = 0.0024 + 0.8*soft_triangle( #Galvo
-        points_per_period, linear_fraction=0.66)
-##    voltage[1] = 5 + 0.08*numpy.ones(points_per_period) #piezo
+##    voltage[0] = 0.0024 + 0.8*soft_triangle( #Galvo
+##        points_per_period, linear_fraction=0.66)
+    from scipy.ndimage import gaussian_filter
+    resonant_period = 7.56e-3
+    resonant_points = 0.5 * resonant_period * rate
+    volts_per_micron = 10. / 300
+
+    voltage[1] = numpy.zeros(40000) #piezo
+    voltage[1][0] = 5
+    on_time = 2000
+    voltage[1][on_time + 0*int(resonant_points)] += -60 * volts_per_micron
+    voltage[1][on_time + 1*int(resonant_points)] += -40 * volts_per_micron
+    
+##    voltage[1][on_time + 0*int(resonant_points)] += 7 * volts_per_micron
+##    voltage[1][on_time + 1*int(resonant_points)] += 7 * volts_per_micron
+##    voltage[1][on_time + 0 + 1*int(resonant_points)] -= 7 * volts_per_micron
+##    voltage[1][on_time + 0 + 2*int(resonant_points)] -= 7 * volts_per_micron
+
+    voltage[1] = numpy.cumsum(voltage[1])
+    voltage[1] = gaussian_filter(voltage[1], sigma=500)
+    voltage[1][-20000:] = 5
 ##    voltage[2] = voltage[0]
 ##    voltage[3] = voltage[0]
-    repetitions = 50
-    rate = 40000
+    repetitions = 1
     daq_card = DAQ(voltage, rate, repetitions)
     print "Scanning DAQ card..."
     print "Press Ctrl-C to cancel"
     try:
         while True:
             daq_card.scan(background=False)
+            raw_input("Hit enter to continue, or Ctrl-C to cancel")
     except KeyboardInterrupt:
         daq_card.close()
         print "Done scanning DAQ card"

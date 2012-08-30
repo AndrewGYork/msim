@@ -412,6 +412,7 @@ def enderlein_image_subprocess(
     enderlein_image = numpy.zeros(
         (new_grid_x.shape[0], new_grid_y.shape[0]), dtype=numpy.float)
     enderlein_normalization = numpy.zeros_like(enderlein_image)
+    enderlein_normalization.fill(1e-12)
     this_frames_enderlein_image = numpy.zeros_like(enderlein_image)
     this_frames_normalization = numpy.zeros_like(enderlein_image)
     if intermediate_data:
@@ -420,6 +421,12 @@ def enderlein_image_subprocess(
             shape=(steps,) + enderlein_image.shape)
         processed_frames = numpy.memmap(
             basename + '_frames.raw', dtype=float, mode='w+',
+            shape=(steps,) + enderlein_image.shape)
+        x_scan_positions = numpy.memmap(
+            basename + '_frames_x.raw', dtype=float, mode='w+',
+            shape=(steps,) + enderlein_image.shape)
+        y_scan_positions = numpy.memmap(
+            basename + '_frames_y.raw', dtype=float, mode='w+',
             shape=(steps,) + enderlein_image.shape)
     if make_widefield_image:
         widefield_image = numpy.zeros_like(enderlein_image)
@@ -431,7 +438,6 @@ def enderlein_image_subprocess(
                 new_grid_x.shape[0] * new_grid_y.shape[0]))
     if make_confocal_image:
         confocal_image = numpy.zeros_like(enderlein_image)
-    enderlein_normalization.fill(1e-12)
     aperture = gaussian(2*window_footprint+1, std=aperture_size
                         ).reshape(2*window_footprint+1, 1)
     aperture = aperture * aperture.T
@@ -516,6 +522,29 @@ def enderlein_image_subprocess(
                     nearest_grid_index[1]-subgrid_footprint[1]:
                     nearest_grid_index[1]+subgrid_footprint[1]+1,
                     ] += 1
+                if intermediate_data:
+                    x_scan_positions[
+                        z,
+                        nearest_grid_index[0]-subgrid_footprint[0]:
+                        nearest_grid_index[0]+subgrid_footprint[0]+1,
+                        nearest_grid_index[1]-subgrid_footprint[1]:
+                        nearest_grid_index[1]+subgrid_footprint[1]+1,
+                        ] += (nearest_grid_point[0] - lp[0] +
+                              grid_step_x * numpy.arange(
+                                  -subgrid_footprint[0],
+                                  subgrid_footprint[0] + 1, 1
+                                  ).reshape((1, 2*subgrid_footprint[0]+1)))
+                    y_scan_positions[
+                        z,
+                        nearest_grid_index[0]-subgrid_footprint[0]:
+                        nearest_grid_index[0]+subgrid_footprint[0]+1,
+                        nearest_grid_index[1]-subgrid_footprint[1]:
+                        nearest_grid_index[1]+subgrid_footprint[1]+1,
+                        ] += (nearest_grid_point[1] - lp[1] +
+                              grid_step_y * numpy.arange(
+                                  -subgrid_footprint[1],
+                                  subgrid_footprint[1] + 1, 1
+                                  ).reshape((2*subgrid_footprint[1]+1, 1)))
                 if make_confocal_image: #FIXME!!!!!!!
                     confocal_image[
                         nearest_grid_index[0]-window_footprint:

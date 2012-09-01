@@ -533,7 +533,7 @@ def enderlein_image_subprocess(
                               grid_step_x * numpy.arange(
                                   -subgrid_footprint[0],
                                   subgrid_footprint[0] + 1, 1
-                                  ).reshape((1, 2*subgrid_footprint[0]+1)))
+                                  ).reshape((2*subgrid_footprint[0]+1, 1)))
                     y_scan_positions[
                         z,
                         nearest_grid_index[0]-subgrid_footprint[0]:
@@ -544,7 +544,7 @@ def enderlein_image_subprocess(
                               grid_step_y * numpy.arange(
                                   -subgrid_footprint[1],
                                   subgrid_footprint[1] + 1, 1
-                                  ).reshape((2*subgrid_footprint[1]+1, 1)))
+                                  ).reshape((1, 2*subgrid_footprint[1]+1)))
                 if make_confocal_image: #FIXME!!!!!!!
                     confocal_image[
                         nearest_grid_index[0]-window_footprint:

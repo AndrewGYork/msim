@@ -348,6 +348,8 @@ class Edge:
         return None
 
     def disarm(self, verbose=True):
+        if verbose:
+            print "Disarming camera..."
         wRecState = ctypes.c_uint16(0) #Turn off recording
         PCO_api.PCO_SetRecordingState(self.camera_handle, wRecState)
         PCO_api.PCO_RemoveBuffer(self.camera_handle)
@@ -356,6 +358,8 @@ class Edge:
         self.buffer_numbers, self.buffer_pointers, self.buffer_events = (
             [], [], [])
         self.armed = False
+        if verbose:
+            print "Camera disarmed."
         return None
 
     def record_to_file(
@@ -455,6 +459,8 @@ class Edge:
         out=None, first_frame=0,
         poll_timeout=5e5):
         """Call this any number of times, after arming the camera once"""
+        if not self.armed:
+            raise UserWarning("record_to_memory doesn't work if the camera isn't armed.")
 
         if not hasattr(self, '_prepared_to_record'):
             self._prepare_to_record_to_memory()

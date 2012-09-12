@@ -245,6 +245,7 @@ def enderlein_image_parallel(
     num_processes=1,
     window_footprint=10,
     aperture_size=3,
+    scale_factor=0.5,
     make_widefield_image=True,
     make_confocal_image=False, #Broken, for now
     verbose=True,
@@ -364,6 +365,7 @@ def enderlein_image_subprocess(
     start_frame=None, end_frame=None,
     window_footprint=10,
     aperture_size=3,
+    scale_factor=0.5,
     make_widefield_image=True,
     make_confocal_image=False, #Broken, for now
     verbose=True,
@@ -373,16 +375,18 @@ def enderlein_image_subprocess(
     normalize=False, #Of uncertain merit, leave 'False' probably
     display=False,
     ):
+    """Determine file names"""
     basename = os.path.splitext(data_filename)[0]
     enderlein_image_name = basename + '_enderlein_image.raw'
     lake_basename = os.path.splitext(lake_filename)[0]
     lake_intensities_name = lake_basename + '_spot_intensities.pkl'
     background_basename = os.path.splitext(background_filename)[0]
     background_name = background_basename + '_background_image.raw'
+    background_directory_name = os.path.dirname(background_name)
 
+    """Load auxiliary data"""
     intensities_vs_galvo_position = cPickle.load(
         open(lake_intensities_name, 'rb'))
-    background_directory_name = os.path.dirname(background_name)
     try:
         background_frame = numpy.fromfile(
             background_name).reshape(xPix, yPix).astype(float)
@@ -391,7 +395,7 @@ def enderlein_image_subprocess(
         print background_name
         print "may not be the size it was expected to be.\n\n"
         raise
-    try:
+    try: #FIXME: should behave gracefully with no HP list
         hot_pixels = numpy.fromfile(
             os.path.join(background_directory_name, 'hot_pixels.txt'), sep=', ')
     except:
@@ -402,6 +406,7 @@ def enderlein_image_subprocess(
     else:
         hot_pixels = hot_pixels.reshape(2, len(hot_pixels)/2)
 
+    """Create data containers"""
     if show_steps or show_slices: fig = pylab.figure()
     if start_frame is None:
         start_frame = 0
@@ -438,21 +443,25 @@ def enderlein_image_subprocess(
                 new_grid_x.shape[0] * new_grid_y.shape[0]))
     if make_confocal_image:
         confocal_image = numpy.zeros_like(enderlein_image)
+
+    """Precalculate a few useful quantities"""
     aperture = gaussian(2*window_footprint+1, std=aperture_size
                         ).reshape(2*window_footprint+1, 1)
     aperture = aperture * aperture.T
     grid_step_x = new_grid_x[1] - new_grid_x[0]
     grid_step_y = new_grid_y[1] - new_grid_y[0]
     subgrid_footprint = numpy.floor(
-        (-1 + window_footprint * 0.5 / grid_step_x,
-         -1 + window_footprint * 0.5 / grid_step_y))
-    subgrid = ( #Add 2*(r_0 - r_M) to this to get s_desired
-        window_footprint + 2 * grid_step_x * numpy.arange(
+        (-1 + window_footprint * scale_factor / grid_step_x,
+         -1 + window_footprint * scale_factor / grid_step_y))
+    subgrid = ( #Add (1/scale_factor)*(r_0 - r_M) to this to get s_desired
+        window_footprint + (1.0 / scale_factor) * grid_step_x * numpy.arange(
             -subgrid_footprint[0], subgrid_footprint[0] + 1),
-        window_footprint + 2 * grid_step_y * numpy.arange(
+        window_footprint + (1.0 / scale_factor) * grid_step_y * numpy.arange(
             -subgrid_footprint[1], subgrid_footprint[1] + 1))
     subgrid_points = ((2*subgrid_footprint[0] + 1) *
                       (2*subgrid_footprint[1] + 1))
+
+    """Now, time to chug through some data."""
     for z in range(start_frame, end_frame+1):
         im = load_image_slice(
             filename=data_filename, xPix=xPix, yPix=yPix,
@@ -500,8 +509,10 @@ def enderlein_image_subprocess(
                 (new_grid_x[0], new_grid_y[0]) +
                 (grid_step_x, grid_step_y) * nearest_grid_index)
             new_coordinates = numpy.meshgrid(
-                subgrid[0] + 2 * (nearest_grid_point[0] - lp[0]),
-                subgrid[1] + 2 * (nearest_grid_point[1] - lp[1]))
+                subgrid[0] + (1.0 / scale_factor) * (
+                    nearest_grid_point[0] - lp[0]),
+                subgrid[1] + (1.0 / scale_factor) * (
+                    nearest_grid_point[1] - lp[1]))
             resampled_image = interpolation.map_coordinates(
                 apertured_image,
                 (new_coordinates[0].reshape(subgrid_points),

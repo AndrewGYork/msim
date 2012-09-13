@@ -21,7 +21,7 @@ def get_lattice_vectors(
     num_harmonics=3,
     outlier_phase=1.,
     calibration_window_size=10,
-    scan_type='visitech',
+    scan_type='1d',
     scan_dimensions=None,
     verbose=False,
     display=False,
@@ -31,10 +31,16 @@ def get_lattice_vectors(
     show_lattice=False,
     record_parameters=True):
 
+    if scan_type == 'visitech': #legacy support
+        scan_type = '1d'
+    elif scan_type == 'dmd': #legacy support
+        scan_type = '2d'
+    assert scan_type in ('1d', '2d', 'arbitrary')
+
     if len(filename_list) < 1:
         raise UserWarning('Filename list is empty.')
     
-    """Given a swept-field confocal image stack, finds
+    """Given a multifocal structured illumination image stack, finds
     the basis vectors of the illumination lattice pattern."""
     if lake is not None:
         print " Detecting lake illumination lattice parameters..."
@@ -89,20 +95,30 @@ def get_lattice_vectors(
             verbose=verbose, display=display,
             show_interpolation=show_interpolation)
         """And the shift vector is cheap to correct"""
-        last_image_proj = numpy.zeros((xPix, yPix), dtype=numpy.float)
-        print "Computing projection of first image..."
+        print "Scan type:", scan_type
+        if scan_type in ('1d', '2d'):
+            image_proj = numpy.zeros((xPix, yPix), dtype=numpy.float)
+            print "Computing projection of last exposure from each slice..."
+        elif scan_type in ('arbitrary',):
+            print "Computing projection of all raw data images..."
+            image_proj = numpy.zeros((zPix, xPix, yPix), dtype=numpy.float)
         for f in filename_list:
-            im = load_image_slice(
-                filename=f, xPix=xPix, yPix=yPix, preframes=preframes,
-                which_slice=zPix-1)
-            last_image_proj = numpy.where(
-                im > last_image_proj, im, last_image_proj)
+            if scan_type in ('1d', '2d'):
+                im = load_image_slice(
+                    filename=f, xPix=xPix, yPix=yPix, preframes=preframes,
+                    which_slice=zPix-1)
+            elif scan_type in ('arbitrary',):
+                im = load_image_data(
+                    filename=f, xPix=xPix, yPix=yPix, zPix=zPix,
+                    preframes=preframes)                
+            image_proj = numpy.where(
+                im > image_proj, im, image_proj)
             sys.stdout.write('\rProjecting image %i'%(i))
             sys.stdout.flush()
         print
         corrected_shift_vector, final_offset_vector = get_precise_shift_vector(
             direct_lattice_vectors, shift_vector, offset_vector,
-            last_image_proj, zPix, scan_type, verbose)
+            image_proj, zPix, scan_type, verbose)            
     else:
         if len(filename_list) > 1:
             raise UserWarning(
@@ -117,6 +133,7 @@ def get_lattice_vectors(
         filtered_fft_abs = spike_filter(fft_abs)
 
         """Find candidate spikes in the Fourier domain"""
+        #FIXME: If 'extent' is unset, add an interactive 'extent' setting.
         coords = find_spikes(
             fft_abs, filtered_fft_abs, extent=extent, num_spikes=num_spikes,
             display=display, animate=animate)
@@ -164,15 +181,20 @@ def get_lattice_vectors(
             verbose=verbose, display=display,
             show_interpolation=show_interpolation)
 
-        shift_vector = get_shift_vector(
-            corrected_basis_vectors, fft_data_folder, filtered_fft_abs,
-            num_harmonics=num_harmonics, outlier_phase=outlier_phase,
-            verbose=verbose, display=display,
-            scan_type=scan_type, scan_dimensions=scan_dimensions)
+        if scan_type in ('1d', '2d'):
+            shift_vector = get_shift_vector(
+                corrected_basis_vectors, fft_data_folder, filtered_fft_abs,
+                num_harmonics=num_harmonics, outlier_phase=outlier_phase,
+                verbose=verbose, display=display,
+                scan_type=scan_type, scan_dimensions=scan_dimensions)
+            im = image_data[-1, :, :]
+        elif scan_type in ('arbitrary',):
+            shift_vector = None
+            im = image_data
         
         corrected_shift_vector, final_offset_vector = get_precise_shift_vector(
             direct_lattice_vectors, shift_vector, offset_vector,
-            image_data[-1, :, :], zPix, scan_type, verbose)
+            im, zPix, scan_type, verbose)
 
     if show_lattice:
         which_filename = 0
@@ -248,6 +270,7 @@ def enderlein_image_parallel(
     scale_factor=0.5,
     make_widefield_image=True,
     make_confocal_image=False, #Broken, for now
+    flat_fielding=True,
     verbose=True,
     show_steps=False, #For debugging
     show_slices=False, #For debugging
@@ -368,6 +391,7 @@ def enderlein_image_subprocess(
     scale_factor=0.5,
     make_widefield_image=True,
     make_confocal_image=False, #Broken, for now
+    flat_fielding=True,
     verbose=True,
     show_steps=False, #For debugging
     show_slices=False, #For debugging
@@ -385,8 +409,9 @@ def enderlein_image_subprocess(
     background_directory_name = os.path.dirname(background_name)
 
     """Load auxiliary data"""
-    intensities_vs_galvo_position = cPickle.load(
-        open(lake_intensities_name, 'rb'))
+    if flat_fielding:
+        intensities_vs_galvo_position = cPickle.load(
+            open(lake_intensities_name, 'rb'))
     try:
         background_frame = numpy.fromfile(
             background_name).reshape(xPix, yPix).astype(float)
@@ -492,9 +517,12 @@ def enderlein_image_subprocess(
                 center_point=lp, window_size=window_footprint,
                 image=im, background=background_frame)
             """Aperture the image with a synthetic pinhole"""
-            intensity_normalization = 1.0 / (
-                intensities_vs_galvo_position.get(
-                    (i, j), {}).get(z, numpy.inf))
+            if flat_fielding:
+                intensity_normalization = 1.0 / (
+                    intensities_vs_galvo_position.get(
+                        (i, j), {}).get(z, numpy.inf))
+            else:
+                intensity_normalization = 1.0
             if (intensity_normalization == 0 or
                 spot_image.shape != (2*window_footprint+1,
                                      2*window_footprint+1)):
@@ -1043,7 +1071,7 @@ def simple_max_finder(a, show_plots=True):
 def get_shift_vector(
     fourier_lattice_vectors, fft_data_folder, filtered_fft_abs,
     num_harmonics=3, outlier_phase=1.,
-    verbose=True, display=True, scan_type='visitech', scan_dimensions=None):
+    verbose=True, display=True, scan_type='1d', scan_dimensions=None):
     if verbose: print "\nCalculating shift vector..."
     center_pix = numpy.array(filtered_fft_abs.shape) // 2
     harmonic_pixels = []
@@ -1087,11 +1115,11 @@ def get_shift_vector(
     for hp in harmonic_pixels:
         for n, p in enumerate(hp):
             values[p] = numpy.unwrap(numpy.angle(values[p]))
-            if scan_type == 'visitech':
+            if scan_type == '1d':
                 slope = numpy.polyfit(
                     range(len(values[p])), values[p], deg=1)[0]
                 values[p] -= slope * numpy.arange(len(values[p]))
-            elif scan_type == 'dmd':
+            elif scan_type == '2d':
                 if scan_dimensions[0] * scan_dimensions[1] != num_slices:
                     raise UserWarning(
                         "The scan dimensions are %i by %i," +
@@ -1131,10 +1159,10 @@ def get_shift_vector(
         pylab.xlim(x_limits)
         fig.show()
 
-    if scan_type == 'visitech':
+    if scan_type == '1d':
         x_s, residues, rank, s = numpy.linalg.lstsq(
             numpy.array(K), numpy.array(slopes))
-    elif scan_type == 'dmd':
+    elif scan_type == '2d':
         x_s, residues, rank, s = {}, [0, 0], [0, 0], [0, 0]
         x_s['fast_axis'], residues[0], rank[0], s[0] = numpy.linalg.lstsq(
             numpy.array(K), numpy.array([sl[0] for sl in slopes]))
@@ -1152,49 +1180,68 @@ def get_shift_vector(
 def get_precise_shift_vector(
     direct_lattice_vectors, shift_vector, offset_vector,
     last_image, zPix, scan_type, verbose):
-    """Use the offset vector to correct the shift vector"""
-    final_offset_vector = get_offset_vector(
-        image=last_image,
-        direct_lattice_vectors=direct_lattice_vectors,
-        verbose=False, display=False, show_interpolation=False)
-    final_lattice = generate_lattice(
-        last_image.shape, direct_lattice_vectors,
-        center_pix=offset_vector + get_shift(
-            shift_vector, zPix - 1))
-    closest_approach = 1e12
-    for p in final_lattice:
-        dif = p - final_offset_vector
-        distance_sq = (dif**2).sum()
-        if distance_sq < closest_approach:
-            closest_lattice_point = p
-            closest_approach = distance_sq
-    shift_error = closest_lattice_point - final_offset_vector
-    if scan_type == 'visitech':
-        movements = zPix - 1
-        corrected_shift_vector = shift_vector - (shift_error * 1.0 / movements)
-    elif scan_type == 'dmd':
-        movements = (
-            (zPix - 1) // shift_vector['scan_dimensions'][0])
-        corrected_shift_vector = dict(shift_vector)
-        corrected_shift_vector['slow_axis'] = (
-            shift_vector['slow_axis'] - shift_error * 1.0 / movements)
+    if scan_type is 'arbitrary':
+        """In the case of 'arbitrary' scan type, the variable
+        'last_image' is poorly named, for legacy reasons. It actually
+        is a 3D stack, and we compute an offset vector for every image
+        in this stack."""
+        corrected_shift_vector = [0]
+        for z in range(1, zPix):
+            corrected_shift_vector.append(
+                get_offset_vector(
+                    image=last_image[z, :, :],
+                    direct_lattice_vectors=direct_lattice_vectors,
+                    verbose=False, display=False, show_interpolation=False) -
+                offset_vector)
+        final_offset_vector = offset_vector + corrected_shift_vector[-1]
+    else:
+        """Use the offset vector to correct the shift vector"""
+        final_offset_vector = get_offset_vector(
+            image=last_image,
+            direct_lattice_vectors=direct_lattice_vectors,
+            verbose=False, display=False, show_interpolation=False)
+        final_lattice = generate_lattice(
+            last_image.shape, direct_lattice_vectors,
+            center_pix=offset_vector + get_shift(
+                shift_vector, zPix - 1))
+        closest_approach = 1e12
+        for p in final_lattice:
+            dif = p - final_offset_vector
+            distance_sq = (dif**2).sum()
+            if distance_sq < closest_approach:
+                closest_lattice_point = p
+                closest_approach = distance_sq
+        shift_error = closest_lattice_point - final_offset_vector
+        if scan_type == '1d':
+            movements = zPix - 1
+            corrected_shift_vector = shift_vector - (
+                shift_error * 1.0 / movements)
+        elif scan_type == '2d':
+            movements = (
+                (zPix - 1) // shift_vector['scan_dimensions'][0])
+            corrected_shift_vector = dict(shift_vector)
+            corrected_shift_vector['slow_axis'] = (
+                shift_vector['slow_axis'] - shift_error * 1.0 / movements)
 
-    if verbose:
-        print "\nCorrecting shift vector..."
-        print " Initial shift vector:"
-        print ' ',
-        pprint.pprint(shift_vector)
-        print " Final offset vector:", final_offset_vector
-        print " Closest predicted lattice point:", closest_lattice_point
-        print " Error:", shift_error, "in", movements, "movements"
-        print " Corrected shift vector:"
-        print ' ',
-        pprint.pprint(corrected_shift_vector)
-        print
+        if verbose:
+            print "\nCorrecting shift vector..."
+            print " Initial shift vector:"
+            print ' ',
+            pprint.pprint(shift_vector)
+            print " Final offset vector:", final_offset_vector
+            print " Closest predicted lattice point:", closest_lattice_point
+            print " Error:", shift_error, "in", movements, "movements"
+            print " Corrected shift vector:"
+            print ' ',
+            pprint.pprint(corrected_shift_vector)
+            print
     return corrected_shift_vector, final_offset_vector
 
 def get_shift(shift_vector, frame_number):
-    if isinstance(shift_vector, dict):
+    if isinstance(shift_vector, list):
+        """This means we have an 'arbitrary' scan-type shift vector"""
+        return shift_vector[frame_number]
+    elif isinstance(shift_vector, dict): 
         """This means we have a 2D shift vector"""
         fast_steps = frame_number % shift_vector['scan_dimensions'][0]
         slow_steps = frame_number // shift_vector['scan_dimensions'][0]

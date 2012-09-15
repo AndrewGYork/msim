@@ -1210,7 +1210,7 @@ def get_precise_shift_vector(
         corrected_shift_vector = [numpy.array([0, 0])]
         for z in range(1, zPix):
             if verbose:
-                sys.stdout.write('\rCalculating shift for frame %i    '%(z))
+                sys.stdout.write('\rComputing shift for frame %i      '%(z))
                 sys.stdout.flush()
             corrected_shift_vector.append(
                 get_offset_vector(
@@ -1218,8 +1218,8 @@ def get_precise_shift_vector(
                     direct_lattice_vectors=direct_lattice_vectors,
                     verbose=False, display=False, show_interpolation=False) -
                 offset_vector)
-            if verbose:
-                print
+        if verbose:
+            print
         final_offset_vector = offset_vector + corrected_shift_vector[-1]
     else:
         """Use the offset vector to correct the shift vector"""
@@ -1367,8 +1367,6 @@ def calculate_scan_uniformity_correction(
         j*lattice_vectors[1]
         for i in (0, -1, 1)
         for j in (0, -1, 1)]
-    print "scan_locations_padded:"
-    print scan_locations_padded
     """Triangulate the illumination grid"""
     if verbose:
         print "Triangulating..."

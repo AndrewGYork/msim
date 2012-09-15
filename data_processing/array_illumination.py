@@ -3,6 +3,13 @@ from itertools import product
 import numpy, pylab
 from scipy.ndimage import gaussian_filter, median_filter, interpolation
 from scipy.signal import hann, gaussian
+try:
+    from scipy.spatial import Delaunay
+except ImportError:
+    raise UserWarning(
+        "We need Delaunay triangulation to correct for scan grid\n" +
+        " nonuniformity, but you don't have a new enough version of scipy.\n" +
+        "Upgrade!")
 
 def get_lattice_vectors(
     filename_list=['Sample.raw'],
@@ -245,7 +252,6 @@ def get_lattice_vectors(
         if lake is not None:
             params.write("Lake filename:" + lake + "\r\n\r\n")
         params.close()
-        
 
     if lake is None or bg is None:
         return (direct_lattice_vectors, corrected_shift_vector, offset_vector)
@@ -272,6 +278,7 @@ def enderlein_image_parallel(
     make_widefield_image=True,
     make_confocal_image=False, #Broken, for now
     flat_fielding=True,
+    scan_uniformity_correction=True,
     verbose=True,
     show_steps=False, #For debugging
     show_slices=False, #For debugging
@@ -393,6 +400,7 @@ def enderlein_image_subprocess(
     make_widefield_image=True,
     make_confocal_image=False, #Broken, for now
     flat_fielding=True,
+    scan_uniformity_correction=True,
     verbose=True,
     show_steps=False, #For debugging
     show_slices=False, #For debugging
@@ -486,6 +494,12 @@ def enderlein_image_subprocess(
             -subgrid_footprint[1], subgrid_footprint[1] + 1))
     subgrid_points = ((2*subgrid_footprint[0] + 1) *
                       (2*subgrid_footprint[1] + 1))
+    if scan_uniformity_correction:
+        vertex_weights = calculate_scan_uniformity_correction(
+            xPix=xPix, yPix=yPix, zPix=zPix,
+            lattice_vectors=lattice_vectors,
+            shift_vector=shift_vector, offset_vector=offset_vector,
+            verbose=verbose, display=display)
 
     """Now, time to chug through some data."""
     for z in range(start_frame, end_frame+1):
@@ -511,6 +525,10 @@ def enderlein_image_subprocess(
                     shift_vector, z),
                 edge_buffer=window_footprint+1,
                 return_i_j=True))
+        if scan_uniformity_correction:
+            uniformity_normalization = vertex_weights[z]
+        else:
+            uniformity_normalization = 1.
         for m, lp in enumerate(lattice_points):
             i, j = int(i_list[m]), int(j_list[m])
             """Take an image centered on each illumination point"""
@@ -530,7 +548,8 @@ def enderlein_image_subprocess(
                 continue #Skip to the next spot
             apertured_image = (aperture *
                                spot_image *
-                               intensity_normalization)
+                               intensity_normalization *
+                               uniformity_normalization)
             nearest_grid_index = numpy.round(
                     (lp - (new_grid_x[0], new_grid_y[0])) /
                     (grid_step_x, grid_step_y))
@@ -1323,6 +1342,61 @@ def combine_lattices(
             edge_buffer=edge_buffer)
     if verbose: print
     return spots
+
+def calculate_scan_uniformity_correction(
+    xPix, yPix, zPix,
+    lattice_vectors, shift_vector, offset_vector,
+    verbose=False, display=False):
+    """
+    The scan grid may not be uniform. This function computes a weight
+    for each exposure to correct for nonuniform scan patterns.
+    """
+    if verbose:
+        print "Calculating scan uniformity correction..."
+    scan_locations = numpy.zeros((zPix, 2))
+    for z in range(zPix):
+        scan_locations[z, :] = offset_vector + get_shift(shift_vector, z)
+    scan_locations_padded = [
+        scan_locations +
+        i*lattice_vectors[0] +
+        j*lattice_vectors[1]
+        for i in (0, -1, 1)
+        for j in (0, -1, 1)]
+    print "scan_locations_padded:"
+    print scan_locations_padded
+    """Triangulate the illumination grid"""
+    if verbose:
+        print "Triangulating..."
+    triangles = Delaunay(numpy.concatenate(
+        scan_locations_padded, axis=0))
+    if verbose:
+        print "Done."
+    vertex_weights = numpy.zeros(triangles.points.shape[0], dtype=numpy.float)
+    for v in triangles.vertices:
+        """'v' is a set of 3 indices in triangles.points"""
+        corners = triangles.points[v]
+        """'corners' is a set of 3 2D coordinates"""
+        triangle_area = abs(numpy.cross(corners[1] - corners[0],
+                                    corners[2] - corners[0]))
+        vertex_weights[v] += 1./3. * triangle_area
+    if display:
+        response = raw_input("Plot triangles? y/[n]:")
+        if response == 'y':
+            print "Plotting triangles..."
+            fig = pylab.figure()
+            for p in scan_locations_padded:
+                pylab.plot(p[:, 1], p[:, 0], '.')
+            pylab.axis('equal')
+            fig.show()
+            fig = pylab.figure()
+            for i, p in enumerate(triangles.points):
+                pylab.text(p[1], p[0], vertex_weights[i])
+            for t in triangles.points[triangles.vertices]:
+                pylab.plot(list(t[:, 1]) + [t[0, 1]],
+                           list(t[:, 0]) + [t[0, 0]], 'r-')
+            pylab.axis('equal')
+            fig.show()
+    return vertex_weights[:zPix]
 
 def spot_intensity_vs_scan_position(
     lake_filename, xPix, yPix, zPix, preframes,

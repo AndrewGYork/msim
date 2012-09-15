@@ -1209,12 +1209,17 @@ def get_precise_shift_vector(
         in this stack."""
         corrected_shift_vector = [numpy.array([0, 0])]
         for z in range(1, zPix):
+            if verbose:
+                sys.stdout.write('\rCalculating shift for frame %i    '%(z))
+                sys.stdout.flush()
             corrected_shift_vector.append(
                 get_offset_vector(
                     image=last_image[z, :, :],
                     direct_lattice_vectors=direct_lattice_vectors,
                     verbose=False, display=False, show_interpolation=False) -
                 offset_vector)
+            if verbose:
+                print
         final_offset_vector = offset_vector + corrected_shift_vector[-1]
     else:
         """Use the offset vector to correct the shift vector"""

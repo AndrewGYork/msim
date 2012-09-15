@@ -250,14 +250,15 @@ def get_lattice_vectors(
     if lake is None or bg is None:
         return (direct_lattice_vectors, corrected_shift_vector, offset_vector)
     else:
-        (intensities_vs_galvo_position, background_frame
-         ) = spot_intensity_vs_galvo_position(
+        (intensities_vs_scan_position, background_frame
+         ) = spot_intensity_vs_scan_position(
              lake, xPix, yPix, zPix, preframes,
              lake_lattice_vectors, lake_shift_vector, lake_offset_vector,
              bg, bg_zPix, window_size=calibration_window_size,
              verbose=verbose, show_steps=show_calibration_steps)
+        
         return (direct_lattice_vectors, corrected_shift_vector, offset_vector,
-                intensities_vs_galvo_position, background_frame)
+                intensities_vs_scan_position, background_frame)
 
 def enderlein_image_parallel(
     data_filename, lake_filename, background_filename,
@@ -410,7 +411,7 @@ def enderlein_image_subprocess(
 
     """Load auxiliary data"""
     if flat_fielding:
-        intensities_vs_galvo_position = cPickle.load(
+        intensities_vs_scan_position = cPickle.load(
             open(lake_intensities_name, 'rb'))
     try:
         background_frame = numpy.fromfile(
@@ -519,7 +520,7 @@ def enderlein_image_subprocess(
             """Aperture the image with a synthetic pinhole"""
             if flat_fielding:
                 intensity_normalization = 1.0 / (
-                    intensities_vs_galvo_position.get(
+                    intensities_vs_scan_position.get(
                         (i, j), {}).get(z, numpy.inf))
             else:
                 intensity_normalization = 1.0
@@ -1038,6 +1039,8 @@ def get_offset_vector(
         window[max_pix[0]-1:max_pix[0]+2, max_pix[1]-1:max_pix[1]+2],
         show_plots=show_interpolation)
     offset_vector = max_pix + correction + numpy.array(image.shape)//2 - ws
+    offset_vector, trash = shift_to_central_unit_cell(
+        offset_vector, image.shape, direct_lattice_vectors)
     if verbose: print "Offset vector:", offset_vector
     return offset_vector
 
@@ -1185,7 +1188,7 @@ def get_precise_shift_vector(
         'last_image' is poorly named, for legacy reasons. It actually
         is a 3D stack, and we compute an offset vector for every image
         in this stack."""
-        corrected_shift_vector = [0]
+        corrected_shift_vector = [numpy.array([0, 0])]
         for z in range(1, zPix):
             corrected_shift_vector.append(
                 get_offset_vector(
@@ -1321,7 +1324,7 @@ def combine_lattices(
     if verbose: print
     return spots
 
-def spot_intensity_vs_galvo_position(
+def spot_intensity_vs_scan_position(
     lake_filename, xPix, yPix, zPix, preframes,
     direct_lattice_vectors, shift_vector, offset_vector,
     background_filename, background_zPix,
@@ -1351,7 +1354,7 @@ def spot_intensity_vs_galvo_position(
         os.path.exists(background_name)):
         print "\nIllumination intensity calibration already calculated."
         print "Loading", os.path.split(lake_intensities_name)[1]
-        intensities_vs_galvo_position = cPickle.load(
+        intensities_vs_scan_position = cPickle.load(
             open(lake_intensities_name, 'rb'))
         print "Loading", os.path.split(background_name)[1]
         try:
@@ -1378,7 +1381,7 @@ def spot_intensity_vs_galvo_position(
 
         lake_image_data = load_image_data(
             lake_filename, xPix, yPix, zPix, preframes)
-        intensities_vs_galvo_position = {}
+        intensities_vs_scan_position = {}
         """A dict of dicts. Element [i, j][z] gives the intensity of the
         i'th, j'th spot in the lattice, in frame z"""
         if show_steps: fig = pylab.figure()
@@ -1398,7 +1401,7 @@ def spot_intensity_vs_galvo_position(
             
             for m, lp in enumerate(lattice_points):
                 i, j = int(i_list[m]), int(j_list[m])
-                intensity_history = intensities_vs_galvo_position.setdefault(
+                intensity_history = intensities_vs_scan_position.setdefault(
                     (i, j), {}) #Get this spot's history
                 spot_image = get_centered_subimage(
                     center_point=lp, window_size=window_size,
@@ -1420,23 +1423,23 @@ def spot_intensity_vs_galvo_position(
         """Normalize the intensity values"""
         num_entries = 0
         total_sum = 0
-        for hist in intensities_vs_galvo_position.values():
+        for hist in intensities_vs_scan_position.values():
             for intensity in hist.values():
                 num_entries += 1
                 total_sum += intensity
         inverse_avg = num_entries * 1.0 / total_sum
-        for hist in intensities_vs_galvo_position.values():
+        for hist in intensities_vs_scan_position.values():
             for k in hist.keys():
                 hist[k] *= inverse_avg
         print "\nSaving", os.path.split(lake_intensities_name)[1]
-        cPickle.dump(intensities_vs_galvo_position,
+        cPickle.dump(intensities_vs_scan_position,
                      open(lake_intensities_name, 'wb'), protocol=2)
         print "Saving", os.path.split(background_name)[1]
         bg.tofile(background_name)
     if display:
         fig=pylab.figure()
         num_lines = 0
-        for (i, j), spot_hist in intensities_vs_galvo_position.items()[:10]:
+        for (i, j), spot_hist in intensities_vs_scan_position.items()[:10]:
             num_lines += 1
             sh = spot_hist.items()
             pylab.plot([frame_num for frame_num, junk in sh],
@@ -1445,12 +1448,27 @@ def spot_intensity_vs_galvo_position(
                        label=repr((i, j)))
         pylab.legend()
         fig.show()
-    return intensities_vs_galvo_position, bg #bg is short for 'background'
+    return intensities_vs_scan_position, bg #bg is short for 'background'
 
 def remove_hot_pixels(image, hot_pixels):
     for y, x in hot_pixels:
         image[x, y] = numpy.median(image[x-1:x+2, y-1:y+2])
     return image
+
+def shift_to_central_unit_cell(coordinates, image_shape, lattice_vectors):
+    offset = numpy.array(coordinates) - (numpy.array(image_shape) // 2)
+    lattice_components = numpy.linalg.solve(
+        numpy.vstack(lattice_vectors[:2]).T,
+        offset)
+    lattice_components_centered = numpy.mod(lattice_components, 1)
+    lattice_components_centered -= (1, 1 #Mod doesn't do exactly what we want
+                                    ) * lattice_components_centered > 0.5
+    lattice_shift = numpy.round(lattice_components -
+                                lattice_components_centered).astype(int)
+    centered_coordinates = (lattice_vectors[0] * lattice_components_centered[0] +
+                            lattice_vectors[1] * lattice_components_centered[1] +
+                            numpy.array(image_shape) // 2)
+    return centered_coordinates, lattice_shift
 
 def generate_lattice(
     image_shape, lattice_vectors, center_pix='image', edge_buffer=2,
@@ -1459,15 +1477,8 @@ def generate_lattice(
     if center_pix == 'image':
         center_pix = numpy.array(image_shape) // 2
     else: ##Shift the center pixel by lattice vectors to the middle of the image
-        center_pix = numpy.array(center_pix) - (numpy.array(image_shape) // 2)
-        lattice_components = numpy.linalg.solve(
-            numpy.vstack(lattice_vectors[:2]).T,
-            center_pix)
-        lattice_components_centered = numpy.mod(lattice_components, 1)
-        lattice_shift = lattice_components - lattice_components_centered
-        center_pix = (lattice_vectors[0] * lattice_components_centered[0] +
-                      lattice_vectors[1] * lattice_components_centered[1] +
-                      numpy.array(image_shape) // 2)
+        center_pix, lattice_shift = shift_to_central_unit_cell(
+            center_pix, image_shape, lattice_vectors)
 
     num_vectors = int(numpy.round(#Hopefully an overestimate
         1.5 * max(image_shape) / numpy.sqrt(lattice_vectors[0]**2).sum()))
@@ -1481,8 +1492,10 @@ def generate_lattice(
     lattice_points = list(lp[valid])
     if return_i_j:
         return (lattice_points,
-                list(i[valid] - lattice_shift[0]),
-                list(j[valid] - lattice_shift[1]))
+                list((i[valid] - lattice_shift[0]
+                      ).reshape(len(lattice_points))),
+                list((j[valid] - lattice_shift[1]
+                      ).reshape(len(lattice_points))))
     else:
         return lattice_points
 
@@ -1629,8 +1642,8 @@ def use_lake_parameters():
     tkroot.destroy()
     return use_all_lake_parameters
 
-if __name__ == '__main__':
-    get_data_locations()
+##if __name__ == '__main__':
+##    get_data_locations()
 
 #####
 #####   Leftover code from when I was doing triangulation myself.            

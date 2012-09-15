@@ -1032,9 +1032,10 @@ def get_offset_vector(
     window = numpy.zeros([2*ws + 1]*2, dtype=numpy.float)
     lattice_points = generate_lattice(
         image.shape, direct_lattice_vectors, edge_buffer=2+ws)
+    im = image.astype(float)
     for lp in lattice_points:
         window += get_centered_subimage(
-            center_point=lp, window_size=ws, image=image.astype(float))
+            center_point=lp, window_size=ws, image=im)
 
     if display:
         fig = pylab.figure()
@@ -1210,7 +1211,7 @@ def get_precise_shift_vector(
         corrected_shift_vector = [numpy.array([0, 0])]
         for z in range(1, zPix):
             if verbose:
-                sys.stdout.write('\rComputing shift for frame %i      '%(z))
+                sys.stdout.write('\rComputing shift for frame %i'%(z))
                 sys.stdout.flush()
             corrected_shift_vector.append(
                 get_offset_vector(

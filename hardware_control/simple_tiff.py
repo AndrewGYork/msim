@@ -86,8 +86,9 @@ def parse_simple_tif(filename='out.tif'):
             break
     return None
 
-def parse_simple_tags(t, ifd_offset):
-    print "IFD at offset", ifd_offset
+def parse_simple_tags(t, ifd_offset, verbose=True):
+    if verbose:
+        print "IFD at offset", ifd_offset
     num_tags = bytes_to_int(t[ifd_offset:ifd_offset+2])
     assert num_tags == 10 #Ten tags
     for i in range(num_tags):
@@ -96,52 +97,100 @@ def parse_simple_tags(t, ifd_offset):
         data_type = bytes_to_int(tag[2:4])
         num_values = bytes_to_int(tag[4:8])
         content = tag[8:]
-        print " Tag %02i:"%i, tag_code, 'dtype:', data_type,
-        print 'num_values:', num_values, 'content:', repr(tag[8:])
+        if verbose:
+            print " Tag %02i:"%i, tag_code, 'dtype:', data_type,
+            print 'num_values:', num_values, 'content:', repr(tag[8:])
         if i == 0:
             assert tag_code == 254
-        if i == 1:
+        elif i == 1:
             assert tag_code == 256
-            print "  Image width:", bytes_to_int(content)
-        if i == 2:
+            if verbose:
+                print "  Image width:", bytes_to_int(content)
+        elif i == 2:
             assert tag_code == 257
-            print "  Image length:", bytes_to_int(content)
-        if i == 3:
+            if verbose:
+                print "  Image length:", bytes_to_int(content)
+        elif i == 3:
             assert tag_code == 258
-            print "  Bits per sample:", bytes_to_int(content)
-        if i == 4:
+            if verbose:
+                print "  Bits per sample:", bytes_to_int(content)
+        elif i == 4:
             assert tag_code == 262
             assert bytes_to_int(content) == 1
-            print "  Photometric interpretation:", bytes_to_int(content)
-        if i == 5:
+            if verbose:
+                print "  Photometric interpretation:", bytes_to_int(content)
+        elif i == 5:
             assert tag_code == 270
             pointer = bytes_to_int(content)
-            print "  Image description offset:", pointer
-            print "  Image description content:"
-            print '  ' + repr(t[pointer:pointer+num_values])
-        if i == 6:
+            if verbose:
+                print "  Image description offset:", pointer
+                print "  Image description content:"
+                print '  ' + repr(t[pointer:pointer+num_values])
+        elif i == 6:
             assert tag_code == 273
             pointer = bytes_to_int(content)
-            print "  Strip offsets:", pointer
-            print "  First five samples at this offset:"
-            print '  ',
-            for b in range(5):
-                print bytes_to_int(t[pointer+b*2:pointer+b*2+2]),
-            print
-        if i == 7:
+            if verbose:
+                print "  Strip offsets:", pointer
+                print "  First five samples at this offset:"
+                print '  ',
+                for b in range(5):
+                    print bytes_to_int(t[pointer+b*2:pointer+b*2+2]),
+                print
+        elif i == 7:
             assert tag_code == 277
-            print "  Samples per pixel:", bytes_to_int(content)
-        if i == 8:
+            if verbose:
+                print "  Samples per pixel:", bytes_to_int(content)
+        elif i == 8:
             assert tag_code == 278
-            print "  Rows per strip:", bytes_to_int(content)
-        if i == 9:
+            if verbose:
+                print "  Rows per strip:", bytes_to_int(content)
+        elif i == 9:
             assert tag_code == 279
-            print "  Strip byte counts:", bytes_to_int(content)
+            if verbose:
+                print "  Strip byte counts:", bytes_to_int(content)
     return num_tags
+
+def simple_tif_to_array(filename='out.tif', out=None, verbose=True):
+    """
+    A very simple reader. Note that this is ONLY designed to read
+    TIFFs written by 'array_to_tif' in this module. Writing a general
+    TIFF reader is much harder.
+    """
+    with open(filename, 'rb') as f:
+        if verbose:
+            print "Reading header:", filename, "..."
+        f.seek(8)
+        f_header = f.read(len(header))
+        if verbose:
+            print " Done reading header."
+        width = bytes_to_int(f_header[22:26])
+        length = bytes_to_int(f_header[34:38])
+        num_chars_in_image_description = bytes_to_int(f_header[66:70])
+        if verbose:
+            print "Reading image description:", filename, "..."
+        image_description = f.read(num_chars_in_image_description).split()
+        if verbose:
+            print " Done reading image description."
+        assert image_description[0] == 'ImageJ=1.45s'
+        num_images = int(image_description[1].split('=')[1])
+        if verbose:
+            print " Width:", width
+            print " Length:", length
+            print " Num chars:", num_chars_in_image_description
+            print " Image description:", image_description
+            print " Num images:", num_images
+        print "Reading data:", filename, "..."
+        data = numpy.fromfile(
+            f, dtype=numpy.uint16, count=width*length*num_images
+            ).reshape(num_images, length, width)
+        print " Done reading data."
+    return data
+
 
 if __name__ == '__main__':
     a = numpy.arange(7*800*900, dtype=numpy.uint16).reshape(7, 800, 900)
-    print a[0, :, :].nbytes
+    print "Number of bytes:", a[0, :, :].nbytes
     array_to_tiff(a)
     parse_simple_tif()
-                 
+    b = simple_tif_to_array()
+    assert a[3, 5, 19] == b[3, 5, 19]         

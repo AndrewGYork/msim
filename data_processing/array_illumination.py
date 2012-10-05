@@ -295,6 +295,8 @@ def enderlein_image_parallel(
 
     basename = os.path.splitext(data_filename)[0]
     enderlein_image_name = basename + '_enderlein_image.raw'
+    background_basename = os.path.splitext(background_filename)[0]
+    background_name = background_basename + '_background_image.raw'
     average_intensity_name = basename + '_avg_intensity.pkl'
     
     if os.path.exists(enderlein_image_name):
@@ -313,7 +315,7 @@ def enderlein_image_parallel(
     else:
         start_time = time.clock()
         image_average_intensity = calculate_laser_intensity_drift(
-            image_filename=data_filename, bg_filename=background_filename,
+            image_filename=data_filename, bg_filename=background_name,
             output_filename=average_intensity_name,
             xPix=xPix, yPix=yPix, zPix=zPix, preframes=preframes,
             display=display)
@@ -439,7 +441,7 @@ def enderlein_image_subprocess(
                 open(signal_avg_intensity_name, 'rb'))
         except IOError:
             image_average_intensity = calculate_laser_intensity_drift(
-                image_filename=data_filename, bg_filename=background_filename,
+                image_filename=data_filename, bg_filename=background_name,
                 output_filename=signal_avg_intensity_name,
                 xPix=xPix, yPix=yPix, zPix=zPix, preframes=preframes,
                 display=display)

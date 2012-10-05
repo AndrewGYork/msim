@@ -278,6 +278,7 @@ def enderlein_image_parallel(
     make_widefield_image=True,
     make_confocal_image=False, #Broken, for now
     flat_fielding=True,
+    laser_intensity_drift_correction=False,
     scan_uniformity_correction=True,
     verbose=True,
     show_steps=False, #For debugging
@@ -294,7 +295,8 @@ def enderlein_image_parallel(
 
     basename = os.path.splitext(data_filename)[0]
     enderlein_image_name = basename + '_enderlein_image.raw'
-
+    average_intensity_name = basename + '_avg_intensity.pkl'
+    
     if os.path.exists(enderlein_image_name):
         print "\nEnderlein image already calculated."
         print "Loading", os.path.split(enderlein_image_name)[1]
@@ -310,6 +312,11 @@ def enderlein_image_parallel(
             raise
     else:
         start_time = time.clock()
+        image_average_intensity = calculate_laser_intensity_drift(
+            image_filename=data_filename, bg_filename=background_filename,
+            output_filename=average_intensity_name,
+            xPix=xPix, yPix=yPix, zPix=zPix, preframes=preframes,
+            display=display)
         if num_processes == 1:
             images = enderlein_image_subprocess(**input_arguments)
         else:
@@ -400,6 +407,7 @@ def enderlein_image_subprocess(
     make_widefield_image=True,
     make_confocal_image=False, #Broken, for now
     flat_fielding=True,
+    laser_intensity_drift_correction=False,
     scan_uniformity_correction=True,
     verbose=True,
     show_steps=False, #For debugging
@@ -413,6 +421,8 @@ def enderlein_image_subprocess(
     enderlein_image_name = basename + '_enderlein_image.raw'
     lake_basename = os.path.splitext(lake_filename)[0]
     lake_intensities_name = lake_basename + '_spot_intensities.pkl'
+    lake_avg_intensity_name = lake_basename + '_avg_intensity.pkl'
+    signal_avg_intensity_name = basename + '_avg_intensity.pkl'
     background_basename = os.path.splitext(background_filename)[0]
     background_name = background_basename + '_background_image.raw'
     background_directory_name = os.path.dirname(background_name)
@@ -421,6 +431,18 @@ def enderlein_image_subprocess(
     if flat_fielding:
         intensities_vs_scan_position = cPickle.load(
             open(lake_intensities_name, 'rb'))
+    if laser_intensity_drift_correction:
+        lake_avg_intensity = cPickle.load(
+            open(lake_avg_intensity_name, 'rb'))
+        try:
+            signal_avg_intensity = cPickle.load(
+                open(signal_avg_intensity_name, 'rb'))
+        except IOError:
+            image_average_intensity = calculate_laser_intensity_drift(
+                image_filename=data_filename, bg_filename=background_filename,
+                output_filename=signal_avg_intensity_name,
+                xPix=xPix, yPix=yPix, zPix=zPix, preframes=preframes,
+                display=display)
     try:
         background_frame = numpy.fromfile(
             background_name).reshape(xPix, yPix).astype(float)
@@ -525,6 +547,15 @@ def enderlein_image_subprocess(
                     shift_vector, z),
                 edge_buffer=window_footprint+1,
                 return_i_j=True))
+        if laser_intensity_drift_correction:
+            signal_avg_intensity_normalization = signal_avg_intensity[z]
+            if flat_fielding:
+                lake_avg_intensity_normalization = lake_avg_intensity[z]
+            else:
+                lake_avg_intensity_normalization = 1
+        else:
+            signal_avg_intensity_normalization = 1
+            lake_avg_intensity_normalization = 1
         if scan_uniformity_correction:
             uniformity_normalization = vertex_weights[z]
         else:
@@ -549,7 +580,9 @@ def enderlein_image_subprocess(
             apertured_image = (aperture *
                                spot_image *
                                intensity_normalization *
-                               uniformity_normalization)
+                               uniformity_normalization *
+                               signal_avg_intensity_normalization *
+                               lake_avg_intensity_normalization)
             nearest_grid_index = numpy.round(
                     (lp - (new_grid_x[0], new_grid_y[0])) /
                     (grid_step_x, grid_step_y))
@@ -1402,6 +1435,33 @@ def calculate_scan_uniformity_correction(
             fig.show()
     return vertex_weights[:zPix]
 
+def calculate_laser_intensity_drift(
+    image_filename, bg_filename, output_filename,
+    xPix, yPix, zPix, preframes,
+    display):
+    
+    image_data = load_image_data(
+        image_filename, xPix, yPix, zPix, preframes)
+    try:
+        bg = numpy.fromfile(bg_filename).reshape(xPix, yPix).astype(float)
+    except ValueError:
+        print "\n\nWARNING: the data file:"
+        print bg_filename
+        print "may not be the size it was expected to be.\n\n"
+        raise
+    average_intensity = gaussian_filter((
+            image_data.sum(axis=2).sum(axis=1) -
+            bg.sum()),
+                                        sigma=5)
+    cPickle.dump(average_intensity,
+                 open(output_filename, 'wb'), protocol=2)
+    if display:
+        fig = pylab.figure()
+        pylab.plot(average_intensity, '.-')
+        pylab.title("Total intensity vs. scan position: "+image_filename)
+        fig.show()
+    return average_intensity
+
 def spot_intensity_vs_scan_position(
     lake_filename, xPix, yPix, zPix, preframes,
     direct_lattice_vectors, shift_vector, offset_vector,
@@ -1413,6 +1473,7 @@ def spot_intensity_vs_scan_position(
 
     lake_basename = os.path.splitext(lake_filename)[0]
     lake_intensities_name = lake_basename + '_spot_intensities.pkl'
+    lake_average_intensity_name = lake_basename + '_avg_intensity.pkl'
     background_basename = os.path.splitext(background_filename)[0]
     background_name = background_basename + '_background_image.raw'
     background_directory_name = os.path.dirname(background_basename)
@@ -1456,9 +1517,13 @@ def spot_intensity_vs_scan_position(
         if hot_pixels is not None:
             bg = remove_hot_pixels(bg, hot_pixels)
         print "Background image complete."
-
         lake_image_data = load_image_data(
             lake_filename, xPix, yPix, zPix, preframes)
+        lake_average_intensity = calculate_laser_intensity_drift(
+            image_filename=lake_filename, bg_filename=background_name,
+            output_filename=lake_average_intensity_name,
+            xPix=xPix, yPix=yPix, zPix=zPix, preframes=preframes,
+            display=display)
         intensities_vs_scan_position = {}
         """A dict of dicts. Element [i, j][z] gives the intensity of the
         i'th, j'th spot in the lattice, in frame z"""

@@ -2,13 +2,13 @@ import numpy
 """
 I often save camera data as raw binary, since it's so easy. However,
 this is annoying to load into ImageJ. For the fun of it, I decided to
-learn how to write simple TIFF files. Since I'm not dealing with the
-overhead of the full TIFF specification, this might actually be pretty
+learn how to write simple TIF files. Since I'm not dealing with the
+overhead of the full TIF specification, this might actually be pretty
 fast.
 """
 
 """
-Each slice in the TIFF has its own header. However, all these headers
+Each slice in the TIF has its own header. However, all these headers
 are quite similar in my case, so I make a single header, and some
 pointers to the spots in the header that change:
 """
@@ -21,7 +21,7 @@ rows_per_strip = header[106:110].view(numpy.uint32)
 strip_byte_counts = header[118:122].view(numpy.uint32)
 next_ifd_offset = header[122:126].view(numpy.uint32)
 
-def array_to_tiff(a, outfile='out.tif'):
+def array_to_tif(a, outfile='out.tif'):
     """
     'a' is assumed to be a 3D numpy array of 16-bit unsigned integers.
     I usually use this for stacks of camera data.
@@ -63,7 +63,7 @@ def array_to_tiff(a, outfile='out.tif'):
     return None
 
 """
-Now a simple parser, to check if our tiff writer is doing what I hoped:
+Now a simple parser, to check if our tif writer is doing what I hoped:
 """
 
 def bytes_to_int(x):
@@ -150,11 +150,11 @@ def parse_simple_tags(t, ifd_offset, verbose=True):
                 print "  Strip byte counts:", bytes_to_int(content)
     return num_tags
 
-def simple_tif_to_array(filename='out.tif', out=None, verbose=True):
+def simple_tif_to_array(filename='out.tif', verbose=True):
     """
     A very simple reader. Note that this is ONLY designed to read
-    TIFFs written by 'array_to_tif' in this module. Writing a general
-    TIFF reader is much harder.
+    TIFs written by 'array_to_tif' in this module. Writing a general
+    TIF reader is much harder.
     """
     with open(filename, 'rb') as f:
         if verbose:
@@ -186,11 +186,134 @@ def simple_tif_to_array(filename='out.tif', out=None, verbose=True):
         print " Done reading data."
     return data
 
+def parse_tif(filename='out.tif'):
+    f = open(filename, 'rb')
+    t = f.read()
+    f.close()
+    assert t[0:4] == 'II*\x00' #Little Endian
+    ifd_offset = bytes_to_int(t[4:8])
+    while True:
+        num_tags, ifd_info = parse_tags(t, ifd_offset, verbose=True)
+        ifd_offset = bytes_to_int(t[ifd_offset + num_tags*12 + 2:
+                                    ifd_offset + num_tags*12 + 6])
+        print "Next IFD offset:",  ifd_offset #Pointer to next IFD
+        print
+        if ifd_offset == 0:
+            break
+    return None
+
+def parse_tags(t, ifd_offset, verbose=True):
+    if verbose:
+        print "IFD at offset", ifd_offset
+    num_tags = bytes_to_int(t[ifd_offset:ifd_offset+2])
+    for i in range(num_tags):
+        tag = t[ifd_offset + 2 + 12*i:ifd_offset + 2 + 12*(i+1)]
+        tag_code = bytes_to_int(tag[0:2])
+        data_type = bytes_to_int(tag[2:4])
+        num_values = bytes_to_int(tag[4:8])
+        content = tag[8:]
+        if verbose:
+            print " Tag %02i:"%i, tag_code, 'dtype:', data_type,
+            print 'num_values:', num_values, 'content:', repr(tag[8:])
+        if tag_code == 256:
+            image_width = bytes_to_int(content)
+            if verbose:
+                print "  Image width:", image_width
+        elif tag_code == 257:
+            image_length = bytes_to_int(content)
+            if verbose:
+                print "  Image length:", image_length
+        elif tag_code == 258:
+            bits_per_sample = bytes_to_int(content)
+            assert bits_per_sample == 16
+            if verbose:
+                print "  Bits per sample:", bits_per_sample
+        elif tag_code == 270:
+            image_description_pointer = bytes_to_int(content)
+            image_description = t[image_description_pointer:
+                                  image_description_pointer+num_values]
+            if verbose:
+                print "  Image description offset:", image_description_pointer
+                print "  Image description content:"
+                print '  ' + repr(image_description)
+        elif tag_code == 273:
+            data_pointer = bytes_to_int(content)
+            if verbose:
+                print "Num values:", num_values
+            assert num_values == 1
+            if verbose:
+                print "  Strip offsets:", data_pointer
+                print "  First five samples at this offset:"
+                print '  ',
+                for b in range(5):
+                    print bytes_to_int(t[data_pointer+b*2:data_pointer+b*2+2]),
+                print
+        elif tag_code == 278:
+            rows_per_strip = bytes_to_int(content)
+            if verbose:
+                print "  Rows per strip:", rows_per_strip
+        elif tag_code == 279:
+            strip_byte_counts = bytes_to_int(content)
+            if verbose:
+                print "Num values:", num_values
+            assert num_values == 1
+            if verbose:
+                print "  Strip byte counts:", strip_byte_counts
+    ifd_info = {
+        'num_tags': num_tags,
+        'width': image_width,
+        'length': image_length,
+        'bit_depth': bits_per_sample,
+        'description': image_description,
+        'strip_offset': data_pointer,
+        'rows_per_strip': rows_per_strip,
+        'strip_byte_count': strip_byte_counts,
+        }
+    return ifd_info
+
+def tif_to_array(filename='out.tif', verbose=False):
+    """
+    A very simple reader. Note that this is ONLY designed to read
+    TIFs written by 'array_to_tif' in this module. Writing a general
+    TIF reader is much harder.
+    """
+    f = open(filename, 'rb')
+    t = f.read()
+    f.close()
+    strip_offsets = []
+    strip_byte_counts = []
+    assert t[0:4] == 'II*\x00' #Little Endian
+    ifd_offset = bytes_to_int(t[4:8])
+    while True:
+        ifd_info = parse_tags(t, ifd_offset, verbose=verbose)
+        strip_offsets.append(ifd_info['strip_offset'])
+        strip_byte_counts.append(ifd_info['strip_byte_count'])
+        ifd_offset = bytes_to_int(t[ifd_offset + ifd_info['num_tags']*12 + 2:
+                                    ifd_offset + ifd_info['num_tags']*12 + 6])
+        if verbose:
+            print "Next IFD offset:",  ifd_offset #Pointer to next IFD
+            print
+        if ifd_offset == 0:
+            break
+    gaps = numpy.diff(strip_offsets) - numpy.array(strip_byte_counts)[:-1]
+    if gaps.max() == 0 and gaps.min() == 0:
+        """ The data is stored in one continuous array, in the order
+        we expect. Load it like a raw binary file. """
+        data_length = numpy.sum(strip_byte_counts)
+        data = numpy.fromstring(t[strip_offsets[0]:
+                                  strip_offsets[0] + data_length],
+                                dtype=numpy.uint16)
+    else:
+        raise UserWarning("The data is not written as one continuous block")
+    num_slices = data.size // (ifd_info['length'] * ifd_info['width'])
+    return data.reshape(num_slices, ifd_info['length'], ifd_info['width'])
 
 if __name__ == '__main__':
     a = numpy.arange(7*800*900, dtype=numpy.uint16).reshape(7, 800, 900)
     print "Number of bytes:", a[0, :, :].nbytes
-    array_to_tiff(a)
+    array_to_tif(a)
     parse_simple_tif()
     b = simple_tif_to_array()
-    assert a[3, 5, 19] == b[3, 5, 19]         
+    c = tif_to_array()
+    assert a[3, 5, 19] == b[3, 5, 19]
+    assert a[3, 5, 19] == c[3, 5, 19]

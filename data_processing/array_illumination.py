@@ -1451,10 +1451,11 @@ def calculate_laser_intensity_drift(
         print bg_filename
         print "may not be the size it was expected to be.\n\n"
         raise
-    average_intensity = gaussian_filter((
-            image_data.sum(axis=2).sum(axis=1) -
-            bg.sum()),
-                                        sigma=5)
+    average_intensity = gaussian_filter(
+        median_filter((image_data.sum(axis=2).sum(axis=1) -
+                       bg.sum()),
+                      size=5)
+        sigma=5)
     cPickle.dump(average_intensity,
                  open(output_filename, 'wb'), protocol=2)
     if display:

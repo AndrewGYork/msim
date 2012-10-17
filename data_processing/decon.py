@@ -1,14 +1,19 @@
-import os, time, ConfigParser
+import os, sys, time, ConfigParser
 import numpy, pylab
-import Tkinter as Tk, tkFileDialog
+import Tkinter as Tk, tkFileDialog, tkSimpleDialog
 from scipy.ndimage import gaussian_filter, center_of_mass
-from scipy.fftpack import fftn, ifftn
+from scipy.fftpack import fftn, ifftn, fftshift
 from simple_tif import tif_to_array, array_to_tif
+
+if sys.platform.startswith('win'):
+    clock = time.clock
+else:
+    clock = time.time
 
 def richardson_lucy_deconvolution(
     image_data=None,
     psf_data=None,
-    num_iterations=10,
+    num_iterations=None,
     modify_psf=False,
     image_data_shape=None,
     image_data_dtype=None,
@@ -40,12 +45,20 @@ def richardson_lucy_deconvolution(
 
     config = get_config()
     image_data = image_data_as_array(
-        image_data, image_data_shape, image_data_dtype, verbose, config
-        ).astype(numpy.float64)
+        image_data, image_data_shape, image_data_dtype, verbose, config)
     if image_data == 'cancelled':
         print "Deconvolution cancelled.\n"
         return None
-    if psf_data is 'gaussian':
+    else:
+        image_data = image_data.astype(numpy.float64)
+
+    if psf_data is None:
+        psf_data = ask_psf_type(config)
+        if psf_data == 'cancelled':
+            print "Deconvolution cancelled.\n"
+            return None
+
+    if psf_data == 'gaussian':
         if psf_sigma is None:
             psf_sigma = ask_psf_sigma(config)
         else:
@@ -62,66 +75,69 @@ def richardson_lucy_deconvolution(
     else:
         psf_data = image_data_as_array(
             psf_data, psf_data_shape, psf_data_dtype, verbose, config,
-            title='Select a PSF file', initialfile='psf.tif'
-            ).astype(numpy.float64)
+            title='Select a PSF file', initialfile='psf.tif')
         if psf_data == 'cancelled':
             print "Deconvolution cancelled\n"
             return None
+        else:
+            psf_data = psf_data.astype(numpy.float64)
         psf_data = condition_psf_data(
             psf_data, new_shape=image_data.shape)
 
-    
+    if num_iterations is None:
+        try:
+            initial_value = int(config.get('File', 'last_num_iterations'))
+        except:
+            initial_value = 10
+        root = Tk.Tk()
+        root.withdraw()
+        num_iterations = tkSimpleDialog.askinteger(
+            title="Iterations",
+            prompt="How many deconvolution iterations?",
+            initialvalue=initial_value,
+            minvalue=1)
+        root.destroy()
+        if num_iterations is None:
+            print "Deconvolution cancelled\n"
+            return None
+        config.set('File', 'last_num_iterations')
+        save_config(config)
+        "Number of iterations to perform:", num_iterations
 
-    return None
-"""
-Iterate (possibly saving intermediate data)
-"""
+    estimate = image_data.copy()
+    history = numpy.zeros((num_iterations + 1,) + (image_data.shape[1:]))
+    history[0, :, :] = estimate.max(axis=0) / estimate.max(axis=0).mean()
 
-##print "Loading data..."
-##data = numpy.fromfile("200nm_steps_cropped.raw", dtype=numpy.uint16
-##                      ).astype(numpy.float).reshape(51, 406, 487)
-##print "Done loading."
-##
-####small_psf = numpy.fromfile('approx_psf.raw', dtype=numpy.float
-####                           ).reshape(11, 14, 14)
-####psf = numpy.pad()
-####otf = fftn(psf)
-##
-##fwhm = (2, 3.5, 3.5)
-##
-##fwhm_to_sigma = 2*numpy.sqrt(2*numpy.log(2))
-##print fwhm_to_sigma
-##sigma = (1.0 / fwhm_to_sigma) * numpy.asarray(fwhm)
-##def blur(x):
-##    return gaussian_filter(x, sigma)
-##
-##"""
-##Iteration:
-##estimate *= Blur(measured/Blur(estimate))
-##"""
-##
-##total_brightness = 1.0 * data.sum()
-##print data.shape
-##estimate = data.copy()
-##steps = 40
-##history = numpy.zeros(((steps+1,) + data.shape[1:]))
-##history[0, :, :] = total_brightness * (estimate.max(axis=0) /
-##                                       estimate.max(axis=0).sum())
-##
-####fig = pylab.figure()
-##for i in range(steps):
-##    print "Calculating iteration %i..."%(i)
-##    start = time.time()
-##    estimate *= blur(data /
-##                     blur(estimate))
-##    end = time.time()
-##    print "Done calculationg iteration %i."%(i)
-##    print "Elapsed time:", end-start
-##    estimate *= total_brightness / estimate.max(axis=0).sum()
-##    history[i, :, :] = estimate.max(axis=0)
-##
-##estimate.tofile('estimate.raw')
-##history.tofile('history.raw')
+    if psf_data != 'gaussian':
+        print "Precomputing..."
+        start = clock()
+        psf_data_fft = fftn(psf_data)
+        psf_data_fft_r = psf_data_fft[::-1, ::-1, ::-1]
+        end = clock()
+        print "Done precomputing. Time:", end - start
+
+    for i in range(num_iterations):
+        print "Computing iteration %i..."%i
+        start = clock()
+        if psf_data == 'gaussian':
+            blurred_estimate = gaussian_filter(estimate, sigma=psf_sigma)
+            estimate *= gaussian_filter((image_data /
+                                         blurred_estimate), sigma=psf_sigma)
+        else:
+            blurred_estimate = ifftn(psf_data_fft * fftn(estimate)).real
+            estimate *= ifftn(psf_data_fft_r * fftn(image_data /
+                                                    blurred_estimate)
+                              ).real
+        end = clock()
+        print " Time:", end - start
+        print " Done computing."
+        print "Saving..."
+        estimate.tofile('estimate.raw')
+        history[i+1, :, :] = estimate.max(axis=0) / (
+            estimate.max(axis=0).mean())
+        history.tofile('history.raw')
+        print "Done saving."
+    return (estimate, history)
 
 def condition_psf_data(psf_data, new_shape=None):
     """Prepare the PSF for FFT-based convolution.
@@ -162,7 +178,7 @@ def condition_psf_data(psf_data, new_shape=None):
 ##                     cmap=pylab.cm.gray, interpolation='nearest')
 ##        fig.show()
 ##    padded_psf_data.tofile('out.raw')
-    return padded_psf_data
+    return fftshift(padded_psf_data)
 
 def image_data_as_array(
     image_data, image_data_shape, image_data_dtype,
@@ -176,10 +192,10 @@ def image_data_as_array(
         root.withdraw()
         image_data = str(os.path.normpath(tkFileDialog.askopenfilename(
             title=title,
-            filetypes=[('TIFF', '.tif'),
-                       ('TIFF', '.tiff'),
-                       ('Raw binary', '.raw'),
-                       ('Raw binary', '.dat')],
+            filetypes=[('TIFF or raw binary', '.tif'),
+                       ('TIFF or raw binary', '.raw'),
+                       ('TIFF or raw binary', '.tiff'),
+                       ('TIFF or raw binary', '.dat')],
             defaultextension='.tif',
             initialdir=os.getcwd(),
             initialfile=initialfile,
@@ -310,10 +326,16 @@ class ImageInfoDialog:
         
         a = Tk.Label(text=' Data type:', master=self.root)
         a.pack()
-        options = sorted(dtype_names.keys())
+        self.dtype_names = (
+            'uint8',
+            'uint16',
+            'uint32',
+            'float32',
+            'float64',
+            )
         self.dtype_name = Tk.StringVar()
         self.dtype_name.set(initial_dtype)
-        a = Tk.OptionMenu(self.root, self.dtype_name, *options)
+        a = Tk.OptionMenu(self.root, self.dtype_name, *self.dtype_names)
         a.bind("<Return>", self.validate)
         a.pack()
 
@@ -338,7 +360,7 @@ class ImageInfoDialog:
             print 'Invalid data shape'
             return None
         try:
-            assert self.dtype_name.get() in dtype_names
+            assert self.dtype_name.get() in self.dtype_names
         except KeyError:
             print "Invalid data type"
             return None
@@ -347,6 +369,73 @@ class ImageInfoDialog:
                 assert s > 0
         except AssertionError:
             print 'Invalid data shape'
+            return None
+        """If we got this far, things are good!"""
+        self.root.destroy()
+        self.validated = True
+        return None
+
+def ask_psf_type(config=None):
+    try:
+        initial_type = config.get('File', 'last_psf_type')
+    except:
+        print "Failed to load PSF type from config file"
+        initial_type = 'gaussian'
+    d = PsfTypeDialog(initial_type=initial_type)
+    if not d.validated:
+        return 'cancelled'
+    config.set('File', 'last_psf_type', initial_type)
+    save_config(config)
+    if d.psf_type is 'User-supplied TIFF or RAW':
+        return None
+    return initial_type
+
+class PsfTypeDialog:
+    def __init__(self, initial_type, master=None):
+        if master is None:
+            self.master = Tk.Tk()
+            self.master.withdraw()
+            master_existed = False
+        else:
+            self.master=master
+            master_existed = True
+
+        self.validated = False
+
+        self.root = Tk.Toplevel(master=self.master)
+        self.root.wm_title('PSF type')
+        self.root.bind("<Escape>", lambda x: self.root.destroy())
+
+        a = Tk.Label(text='Point spread function type:', master=self.root)
+        a.pack()
+        self.psf_types = (
+            'gaussian',
+            'User-supplied TIFF or RAW'
+            )
+        self.psf_type = Tk.StringVar()
+        self.psf_type.set(initial_type)
+        a = Tk.OptionMenu(self.root, self.psf_type, *self.psf_types)
+        a.bind("<Return>", self.validate)
+        a.pack()
+
+        a = Tk.Button(text='Ok', master=self.root, command=self.validate)
+        a.bind("<Return>", self.validate)
+        a.pack()
+        a.focus_set()
+        
+        a = Tk.Button(text='Cancel', master=self.root,
+                      command=self.root.destroy)
+        a.pack()
+
+        self.master.wait_window(self.root)
+        if not master_existed:
+            self.master.destroy()
+
+    def validate(self, event=None):
+        try:
+            assert self.psf_type.get() in self.psf_types
+        except KeyError:
+            print "Invalid psf type"
             return None
         """If we got this far, things are good!"""
         self.root.destroy()
@@ -479,8 +568,8 @@ def save_config(config):
     return None
 
 if __name__ == '__main__':
-    richardson_lucy_deconvolution(image_data='200nm_steps_cropped.tif',
-                                  psf_data='gaussian')
+##    richardson_lucy_deconvolution(image_data='200nm_steps_cropped.tif',
+##                                  psf_data='gaussian')
 
 ##    richardson_lucy_deconvolution(
 ##        image_data='200nm_steps_cropped.raw',
@@ -489,4 +578,5 @@ if __name__ == '__main__':
 ##
 ##    richardson_lucy_deconvolution(image_data='200nm_steps_cropped.raw')
 ##
-##    richardson_lucy_deconvolution()
+    richardson_lucy_deconvolution()
+ 

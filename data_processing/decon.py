@@ -1,5 +1,5 @@
 import os, sys, time, ConfigParser
-import numpy, pylab
+import numpy
 import Tkinter as Tk, tkFileDialog, tkSimpleDialog
 from scipy.ndimage import gaussian_filter, center_of_mass
 from scipy.fftpack import fftn, ifftn, fftshift
@@ -170,6 +170,7 @@ def condition_psf_data(psf_data, new_shape=None):
         high_crop = low_crop + psf_data.shape[i]
         slices.append(slice(low_crop, high_crop))
     padded_psf_data[slices] = psf_data
+##    import pylab
 ##    print psf_data.shape
 ##    print padded_psf_data.shape
 ##    if display:

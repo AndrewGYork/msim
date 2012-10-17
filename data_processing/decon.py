@@ -384,11 +384,11 @@ def ask_psf_type(config=None):
     d = PsfTypeDialog(initial_type=initial_type)
     if not d.validated:
         return 'cancelled'
-    config.set('File', 'last_psf_type', initial_type)
+    config.set('File', 'last_psf_type', d.psf_type)
     save_config(config)
-    if d.psf_type is 'User-supplied TIFF or RAW':
+    if d.psf_type == 'User-supplied TIFF or RAW':
         return None
-    return initial_type
+    return d.psf_type
 
 class PsfTypeDialog:
     def __init__(self, initial_type, master=None):
@@ -440,6 +440,7 @@ class PsfTypeDialog:
         """If we got this far, things are good!"""
         self.root.destroy()
         self.validated = True
+        self.psf_type = self.psf_type.get()
         return None
 
 def ask_psf_sigma(config=None):

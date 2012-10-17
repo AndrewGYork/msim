@@ -10,7 +10,7 @@ error, read NIDAQmx.h to decypher it."""
 class DAQ:
     def __init__(
         self, voltage={0:(0, 0)}, rate=500, repetitions=1,
-        board_name='cDAQ1Mod1', voltage_limits=None):
+        board_name='cDAQ1Mod1', voltage_limits=None, num_channels=4):
         """'voltage' should be a dict of numpy arrays of
         floating-point numbers. The keys of 'voltage' are integers,
         0-3. Each element of 'voltage' should start and end near zero.
@@ -18,10 +18,11 @@ class DAQ:
         """
         self.board_name = board_name #Check Measurement and Automation Explorer
         self._taskHandle = ctypes.c_void_p(0)
+        self.num_channels = num_channels
         DAQmxErrChk(api.DAQmxCreateTask("", ctypes.byref(self._taskHandle)))
         DAQmxErrChk(api.DAQmxCreateAOVoltageChan(
             self._taskHandle,
-            self.board_name + "/ao0:3", #Open all four channels
+            self.board_name + "/ao0:%i"%(num_channels - 1),
             "",
             ctypes.c_double(-10.0), #Minimum voltage
             ctypes.c_double(10.0), #Maximum voltage
@@ -41,18 +42,21 @@ class DAQ:
                 0: 10,
                 1: 10,
                 2: 10,
-                3: 10}
+                3: 10,
+                4: 10,
+                5: 10,}
         num_points = -1
-        for k in range(4):
+        for k in range(self.num_channels):
             if k in voltage:
                 v = numpy.asarray(voltage[k])
-                if v.max() - v.min() > voltage_limits[k]:
+                if (abs(v.max()) > voltage_limits[k] or
+                    abs(v.min()) > voltage_limits[k]):
                     raise UserWarning(
                         "Voltage signal amplitude exceeds voltage limits.")
                 if num_points == -1:
                     num_points = len(v)
                     self.voltage = numpy.zeros(
-                        (num_points, 4), dtype=numpy.float64)
+                        (num_points, self.num_channels), dtype=numpy.float64)
                 if len(v) != num_points:
                     raise UserWarning(
                         'Every channel in "voltage" must have the same' +
@@ -86,7 +90,7 @@ class DAQ:
                 "again.")
         DAQmxErrChk(api.DAQmxWriteAnalogF64(
             self._taskHandle,
-            len(self.voltage)//4,
+            len(self.voltage) // self.num_channels,
             0,
             ctypes.c_double(10.0), #Timeout for writing. Hope it ain't this slow.
             1, #DAQmx_Val_GroupByScanNumber (interleaved)

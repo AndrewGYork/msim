@@ -21,6 +21,8 @@ def richardson_lucy_deconvolution(
     psf_data_dtype=None,
     psf_sigma=None,
     verbose=True,
+    output_name=None,
+    tk_master=None,
     ):
     """Deconvolve a 2D or 3D image using the Richardson-Lucy algorithm
     from an image and a point-spread funciton (PSF)
@@ -43,9 +45,15 @@ def richardson_lucy_deconvolution(
     Select and load image data.
     """
 
+    if tk_master is None:
+        tk_master = Tk.Tk()
+        tk_master.withdraw()
+
     config = get_config()
-    image_data = image_data_as_array(
-        image_data, image_data_shape, image_data_dtype, verbose, config)
+    image_data, output_name = image_data_as_array(
+        image_data, image_data_shape, image_data_dtype,
+        output_name, verbose, config)
+    output_basename, output_extension = os.path.splitext(output_name)
     if image_data == 'cancelled':
         print "Deconvolution cancelled.\n"
         return None
@@ -53,14 +61,14 @@ def richardson_lucy_deconvolution(
         image_data = image_data.astype(numpy.float64)
 
     if psf_data is None:
-        psf_data = ask_psf_type(config)
+        psf_data = ask_psf_type(config, master=tk_master)
         if psf_data == 'cancelled':
             print "Deconvolution cancelled.\n"
             return None
 
     if psf_data == 'gaussian':
         if psf_sigma is None:
-            psf_sigma = ask_psf_sigma(config)
+            psf_sigma = ask_psf_sigma(config, master=tk_master)
         else:
             assert len(psf_sigma) == len(image_data.shape)
             for s in psf_sigma:
@@ -73,8 +81,9 @@ def richardson_lucy_deconvolution(
                         " numbers with one entry for each dimension" +
                         " of the input image.")
     else:
-        psf_data = image_data_as_array(
-            psf_data, psf_data_shape, psf_data_dtype, verbose, config,
+        psf_data, trash = image_data_as_array(
+            psf_data, psf_data_shape, psf_data_dtype,
+            output_name=None, verbose=verbose, config=config,
             title='Select a PSF file', initialfile='psf.tif')
         if psf_data == 'cancelled':
             print "Deconvolution cancelled\n"
@@ -89,14 +98,11 @@ def richardson_lucy_deconvolution(
             initial_value = int(config.get('File', 'last_num_iterations'))
         except:
             initial_value = 10
-        root = Tk.Tk()
-        root.withdraw()
         num_iterations = tkSimpleDialog.askinteger(
             title="Iterations",
             prompt="How many deconvolution iterations?",
             initialvalue=initial_value,
             minvalue=1)
-        root.destroy()
         if num_iterations is None:
             print "Deconvolution cancelled\n"
             return None
@@ -132,10 +138,10 @@ def richardson_lucy_deconvolution(
         print " Time:", end - start
         print " Done computing."
         print "Saving..."
-        estimate.tofile('estimate.raw')
+        estimate.tofile(output_basename + '_estimate' + output_extension)
         history[i+1, :, :] = estimate.max(axis=0) / (
             estimate.max(axis=0).mean())
-        history.tofile('history.raw')
+        history.tofile(output_basename + '_history' + output_extension)
         print "Done saving."
     return (estimate, history)
 
@@ -183,14 +189,15 @@ def condition_psf_data(psf_data, new_shape=None):
 
 def image_data_as_array(
     image_data, image_data_shape, image_data_dtype,
-    verbose, config,
+    output_name, verbose, config,
     title='Select an image to deconvolve',
-    initialfile='image.tif',
+    initialfile='image.tif', master=None
     ):
 
     if image_data is None:
-        root = Tk.Tk()
-        root.withdraw()
+        if master is None:
+            root = Tk.Tk()
+            root.withdraw()
         image_data = str(os.path.normpath(tkFileDialog.askopenfilename(
             title=title,
             filetypes=[('TIFF or raw binary', '.tif'),
@@ -201,11 +208,14 @@ def image_data_as_array(
             initialdir=os.getcwd(),
             initialfile=initialfile,
             )))
-        root.destroy()
+        if master is None:
+            root.destroy()
         if image_data == '.':
-            return 'cancelled'
+            return 'cancelled', None
 
     if type(image_data) is str:
+        if output_name is None:
+            output_name = os.path.splitext(image_data)[0] + '.raw'
         while True:
             try:
                 image_data = image_filename_to_array(
@@ -218,10 +228,13 @@ def image_data_as_array(
             except UserWarning as e:
                 print e
         if image_data == 'cancelled':
-            return 'cancelled'
+            return 'cancelled', None
+    else:
+        if output_name is None:
+            output_name = os.path.join(os.path.getcwd(), 'deconvolution.raw')
     print image_data.shape
     assert type(image_data) is numpy.ndarray
-    return image_data
+    return image_data, output_name
 
 def image_filename_to_array(
     image_filename, shape=None, dtype=None, verbose=True, config=None):
@@ -234,7 +247,8 @@ def image_filename_to_array(
         return tif_to_array(image_filename)
     elif extension in ('.raw', '.dat'):
         if (shape is None) or (dtype is None):
-            info = get_image_info(image_filename, config=config)
+            info = get_image_info(
+                image_filename, config=config, master=tk_master)
             if info == 'cancelled':
                 return 'cancelled'
             xy_shape, dtype_name = info
@@ -265,7 +279,7 @@ def image_filename_to_array(
                           "File extension must be one of:\n"
                           " ('.tif', '.tiff', '.raw', '.dat').")
 
-def get_image_info(image_filename, config=None):
+def get_image_info(image_filename, config=None, master=None):
     try:
         initial_shape = (
             config.get('File', 'last_updown_shape'),
@@ -277,6 +291,7 @@ def get_image_info(image_filename, config=None):
         initial_dtype='uint16'
     d = ImageInfoDialog(
         image_filename=image_filename,
+        master=master,
         initial_shape=initial_shape,
         initial_dtype=initial_dtype)
     if not d.validated:
@@ -347,6 +362,8 @@ class ImageInfoDialog:
                       command=self.root.destroy)
         a.pack()
 
+        self.root.lift()
+
         self.master.wait_window(self.root)
         if not master_existed:
             self.master.destroy()
@@ -376,13 +393,13 @@ class ImageInfoDialog:
         self.validated = True
         return None
 
-def ask_psf_type(config=None):
+def ask_psf_type(config=None, master=None):
     try:
         initial_type = config.get('File', 'last_psf_type')
     except:
         print "Failed to load PSF type from config file"
         initial_type = 'gaussian'
-    d = PsfTypeDialog(initial_type=initial_type)
+    d = PsfTypeDialog(initial_type=initial_type, master=master)
     if not d.validated:
         return 'cancelled'
     config.set('File', 'last_psf_type', d.psf_type)
@@ -428,6 +445,8 @@ class PsfTypeDialog:
                       command=self.root.destroy)
         a.pack()
 
+        self.root.lift()
+
         self.master.wait_window(self.root)
         if not master_existed:
             self.master.destroy()
@@ -444,7 +463,7 @@ class PsfTypeDialog:
         self.psf_type = self.psf_type.get()
         return None
 
-def ask_psf_sigma(config=None):
+def ask_psf_sigma(config=None, master=None):
     try:
         initial_fwhm = (
             config.get('File', 'last_axial_psf_fwhm'),
@@ -453,7 +472,7 @@ def ask_psf_sigma(config=None):
     except:
         print "Error loading PSF FWHM from config file"
         initial_fwhm = ('1', '1', '1')
-    d = PsfFwhmDialog(initial_fwhm=initial_fwhm)
+    d = PsfFwhmDialog(initial_fwhm=initial_fwhm, master=master)
     if not d.validated:
         return 'cancelled'
     config.set('File', 'last_axial_psf_fwhm', repr(d.fwhm[0]))
@@ -517,6 +536,8 @@ class PsfFwhmDialog:
         a = Tk.Button(text='Cancel', master=self.root,
                       command=self.root.destroy)
         a.pack()
+        
+        self.root.lift()
 
         self.master.wait_window(self.root)
         if not master_existed:
@@ -564,7 +585,7 @@ def get_config():
     return config
 
 def save_config(config):
-    with open(os.path.join(os.getcwd(), 'decon_config.ini'), 'wb'
+    with open(os.path.join(os.getcwd(), 'decon_config.ini'), 'w'
               ) as configfile:
         config.write(configfile)
     return None

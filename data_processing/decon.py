@@ -100,7 +100,7 @@ def richardson_lucy_deconvolution(
         if num_iterations is None:
             print "Deconvolution cancelled\n"
             return None
-        config.set('File', 'last_num_iterations')
+        config.set('File', 'last_num_iterations', num_iterations)
         save_config(config)
         "Number of iterations to perform:", num_iterations
 

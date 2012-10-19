@@ -223,7 +223,8 @@ def image_data_as_array(
                     shape=image_data_shape,
                     dtype=image_data_dtype,
                     verbose=verbose,
-                    config=config)
+                    config=config,
+                    master=master)
                 break
             except UserWarning as e:
                 print e
@@ -237,7 +238,8 @@ def image_data_as_array(
     return image_data, output_name
 
 def image_filename_to_array(
-    image_filename, shape=None, dtype=None, verbose=True, config=None):
+    image_filename, shape=None, dtype=None,
+    verbose=True, config=None, master=None):
     """Load tif (.tif, .tiff extension) and raw binary files (.dat,
     .raw extension). If raw binary, 'dtype' and 'shape' must be specified."""
     if verbose:
@@ -248,7 +250,7 @@ def image_filename_to_array(
     elif extension in ('.raw', '.dat'):
         if (shape is None) or (dtype is None):
             info = get_image_info(
-                image_filename, config=config, master=tk_master)
+                image_filename, config=config, master=master)
             if info == 'cancelled':
                 return 'cancelled'
             xy_shape, dtype_name = info
@@ -270,6 +272,7 @@ def image_filename_to_array(
             data = data.reshape(
                 (data.size // (xy_shape[0] * xy_shape[1]),) + xy_shape)
         except ValueError:
+            print xy_shape, dtype
             raise UserWarning("The given shape and datatype do not match" +
                               " the size of %s"%(
                                   os.path.split(image_filename)[1]))
@@ -287,7 +290,7 @@ def get_image_info(image_filename, config=None, master=None):
         initial_dtype = config.get('File', 'last_dtype')
     except:
         print "Error loading config file"
-        initial_shape = ('0', '0')
+        initial_shape = ['0', '0']
         initial_dtype='uint16'
     d = ImageInfoDialog(
         image_filename=image_filename,
@@ -323,22 +326,22 @@ class ImageInfoDialog:
 
         a = Tk.Label(text=' Left-right:', master=self.root)
         a.pack()
-        self.lr_pixels = Tk.StringVar()
-        a = Tk.Spinbox(values=range(1, int(1e5)), increment=1,
-                       textvar=self.lr_pixels, master=self.root)
-        a.focus_set()
-        a.bind("<Return>", self.validate)
-        self.lr_pixels.set(initial_shape[1])
-        a.pack()
+        a = Tk.StringVar()
+        self.lr_pixels = Tk.Spinbox(values=range(1, int(1e5)), increment=1,
+                                    textvar=a, master=self.root)
+        self.lr_pixels.focus_set()
+        self.lr_pixels.bind("<Return>", self.validate)
+        a.set(initial_shape[1])
+        self.lr_pixels.pack()
 
         a = Tk.Label(text=' Up-down:', master=self.root)
         a.pack()
-        self.ud_pixels = Tk.StringVar()
-        a = Tk.Spinbox(values=range(1, int(1e5)), increment=1,
-                       textvar=self.ud_pixels, master=self.root)
-        a.bind("<Return>", self.validate)
-        self.ud_pixels.set(initial_shape[0])
-        a.pack()
+        a = Tk.StringVar()
+        self.ud_pixels = Tk.Spinbox(values=range(1, int(1e5)), increment=1,
+                       textvar=a, master=self.root)
+        self.ud_pixels.bind("<Return>", self.validate)
+        a.set(initial_shape[0])
+        self.ud_pixels.pack()
         
         a = Tk.Label(text=' Data type:', master=self.root)
         a.pack()

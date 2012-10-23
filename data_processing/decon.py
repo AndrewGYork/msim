@@ -58,7 +58,7 @@ def richardson_lucy_deconvolution(
         print "Deconvolution cancelled.\n"
         return None
     else:
-        image_data = image_data.astype(numpy.float64)
+        image_data = 1e-12 + image_data.astype(numpy.float64)
 
     if psf_data is None:
         psf_data = ask_psf_type(config, master=tk_master)
@@ -89,7 +89,7 @@ def richardson_lucy_deconvolution(
             print "Deconvolution cancelled\n"
             return None
         else:
-            psf_data = psf_data.astype(numpy.float64)
+            psf_data = 1e-12 + psf_data.astype(numpy.float64)
         psf_data = condition_psf_data(
             psf_data, new_shape=image_data.shape)
 

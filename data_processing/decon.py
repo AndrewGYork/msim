@@ -58,6 +58,9 @@ def richardson_lucy_deconvolution(
         print "Deconvolution cancelled.\n"
         return None
     else:
+        if image_data.min() < 0:
+            raise UserWarning("Image data has negative elements!\n" + 
+                "This violates the assumptions of Richardson-Lucy deconvolution.")
         image_data = 1e-12 + image_data.astype(numpy.float64)
 
     if psf_data is None:

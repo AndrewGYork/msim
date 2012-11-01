@@ -143,6 +143,7 @@ def richardson_lucy_deconvolution(
             estimate.max(axis=0).mean())
         history.tofile(output_basename + '_history' + output_extension)
         print "Done saving."
+        sys.stdout.flush()
     return (estimate, history)
 
 def condition_psf_data(psf_data, new_shape=None):
@@ -558,7 +559,7 @@ class PsfFwhmDialog:
             return None
         try:
             for s in self.fwhm:
-                assert s > 0
+                assert s >= 0
         except AssertionError:
             print 'Invalid PSF dimensions'
             return None

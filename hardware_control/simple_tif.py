@@ -269,7 +269,7 @@ def parse_tags(t, ifd_offset, verbose=True):
         'rows_per_strip': rows_per_strip,
         'strip_byte_count': strip_byte_counts,
         }
-    return ifd_info
+    return num_tags, ifd_info
 
 def tif_to_array(filename='out.tif', verbose=False):
     """
@@ -285,7 +285,7 @@ def tif_to_array(filename='out.tif', verbose=False):
     assert t[0:4] == 'II*\x00' #Little Endian
     ifd_offset = bytes_to_int(t[4:8])
     while True:
-        ifd_info = parse_tags(t, ifd_offset, verbose=verbose)
+        num_tags, ifd_info = parse_tags(t, ifd_offset, verbose=verbose)
         strip_offsets.append(ifd_info['strip_offset'])
         strip_byte_counts.append(ifd_info['strip_byte_count'])
         ifd_offset = bytes_to_int(t[ifd_offset + ifd_info['num_tags']*12 + 2:
@@ -296,7 +296,11 @@ def tif_to_array(filename='out.tif', verbose=False):
         if ifd_offset == 0:
             break
     gaps = numpy.diff(strip_offsets) - numpy.array(strip_byte_counts)[:-1]
-    if gaps.max() == 0 and gaps.min() == 0:
+    if len(gaps) == 0: #Only one slice
+        continuous = True
+    elif gaps.max() == 0 and gaps.min() == 0:
+        continuous = True
+    if continuous:
         """ The data is stored in one continuous array, in the order
         we expect. Load it like a raw binary file. """
         data_length = numpy.sum(strip_byte_counts)

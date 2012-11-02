@@ -518,6 +518,8 @@ class Edge:
             if dwStatusDrv.value == 0x0L:
                 pass
             elif dwStatusDrv.value == 0x80332028:
+                """I should probably clear the buffer and give it back
+                to the driver with AddBufferEx..."""
                 raise DMAError('DMA error during record_to_memory')
             else:
                 print "dwStatusDrv:", dwStatusDrv.value

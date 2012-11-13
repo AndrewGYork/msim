@@ -33,6 +33,8 @@ def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
     if slices is not None and channels is not None:
         assert slices * channels == z
         hyperstack = True
+    else:
+        hyperstack = False
     """
     We have a precomputed header. We edit portions of the header which
     are specific to the array 'a':

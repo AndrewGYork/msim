@@ -21,23 +21,33 @@ rows_per_strip = header[106:110].view(numpy.uint32)
 strip_byte_counts = header[118:122].view(numpy.uint32)
 next_ifd_offset = header[122:126].view(numpy.uint32)
 
-def array_to_tif(a, outfile='out.tif'):
+def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
     """
     'a' is assumed to be a 3D numpy array of 16-bit unsigned integers.
     I usually use this for stacks of camera data.
+    If the data is multi-color, then slices * channels must equal a.shape[0].
     """
     assert a.dtype == numpy.uint16
     assert len(a.shape) == 3
     z, y, x = a.shape
+    if slices is not None and channels is not None:
+        assert slices * channels == z
+        hyperstack = True
     """
     We have a precomputed header. We edit portions of the header which
     are specific to the array 'a':
     """
     width[0] = x
     length[0] = y
-    image_description = ''.join((
-        'ImageJ=1.45s\nimages=%i\nslices=%i\n'%(z, z),
-        'loop=false\nmin=%0.3f\nmax=%0.3f\n\x00'%(a.min(), a.max())))
+    if hyperstack:
+        image_description = ''.join((
+            'ImageJ=1.45s\nimages=%i\nchannels=%i\n'%(z, channels),
+            'slices=%i\nhyperstack=true\nmode=grayscale\n'%(slices),
+            'loop=false\nmin=%0.3f\nmax=%0.3f\n\x00'%(a.min(), a.max())))
+    else:
+        image_description = ''.join((
+            'ImageJ=1.45s\nimages=%i\nslices=%i\n'%(z, z),
+            'loop=false\nmin=%0.3f\nmax=%0.3f\n\x00'%(a.min(), a.max())))        
     num_chars_in_image_description[0] = len(image_description)
     strip_offset[0] = 8 + header.nbytes + len(image_description)
     rows_per_strip[0] = y

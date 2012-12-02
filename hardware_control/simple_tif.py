@@ -218,6 +218,7 @@ def parse_tags(t, ifd_offset, verbose=True):
     if verbose:
         print "IFD at offset", ifd_offset
     num_tags = bytes_to_int(t[ifd_offset:ifd_offset+2])
+    dtype = 'uint'
     for i in range(num_tags):
         tag = t[ifd_offset + 2 + 12*i:ifd_offset + 2 + 12*(i+1)]
         tag_code = bytes_to_int(tag[0:2])
@@ -237,7 +238,7 @@ def parse_tags(t, ifd_offset, verbose=True):
                 print "  Image length:", image_length
         elif tag_code == 258:
             bits_per_sample = bytes_to_int(content)
-            assert bits_per_sample == 16
+            assert bits_per_sample in (8, 16, 32, 64)
             if verbose:
                 print "  Bits per sample:", bits_per_sample
         elif tag_code == 270:
@@ -251,7 +252,7 @@ def parse_tags(t, ifd_offset, verbose=True):
         elif tag_code == 273:
             data_pointer = bytes_to_int(content)
             if verbose:
-                print "Num values:", num_values
+                print "  Num values:", num_values
             assert num_values == 1
             if verbose:
                 print "  Strip offsets:", data_pointer
@@ -271,6 +272,15 @@ def parse_tags(t, ifd_offset, verbose=True):
             assert num_values == 1
             if verbose:
                 print "  Strip byte counts:", strip_byte_counts
+        elif tag_code == 339:
+            dtype = {
+                1: 'uint',
+                2: 'int',
+                3: 'float',
+                4: 'undefined',
+                }[bytes_to_int(content)]
+            if verbose:
+                print "Image data type:", dtype
     ifd_info = {
         'num_tags': num_tags,
         'width': image_width,
@@ -280,6 +290,7 @@ def parse_tags(t, ifd_offset, verbose=True):
         'strip_offset': data_pointer,
         'rows_per_strip': rows_per_strip,
         'strip_byte_count': strip_byte_counts,
+        'format': dtype,
         }
     return num_tags, ifd_info
 
@@ -316,20 +327,31 @@ def tif_to_array(filename='out.tif', verbose=False):
         """ The data is stored in one continuous array, in the order
         we expect. Load it like a raw binary file. """
         data_length = numpy.sum(strip_byte_counts)
+        data_format = ifd_info['format']
+        data_bitdepth = ifd_info['bit_depth']
+        data_type = data_format + str(data_bitdepth)
+        try:
+            data_type = getattr(numpy, data_type)
+        except AttributeError:
+            raise UserWarning("Unsupported data format: " + data_type)
         data = numpy.fromstring(t[strip_offsets[0]:
                                   strip_offsets[0] + data_length],
-                                dtype=numpy.uint16)
+                                dtype=data_type)
     else:
         raise UserWarning("The data is not written as one continuous block")
     num_slices = data.size // (ifd_info['length'] * ifd_info['width'])
     return data.reshape(num_slices, ifd_info['length'], ifd_info['width'])
 
 if __name__ == '__main__':
-    a = numpy.arange(7*800*900, dtype=numpy.uint16).reshape(7, 800, 900)
-    print "Number of bytes:", a[0, :, :].nbytes
-    array_to_tif(a)
-    parse_simple_tif()
-    b = simple_tif_to_array()
-    c = tif_to_array()
-    assert a[3, 5, 19] == b[3, 5, 19]
-    assert a[3, 5, 19] == c[3, 5, 19]
+##    a = numpy.arange(7*800*900, dtype=numpy.uint16).reshape(7, 800, 900)
+##    print "Number of bytes:", a[0, :, :].nbytes
+##    array_to_tif(a)
+##    parse_simple_tif()
+##    b = simple_tif_to_array()
+##    c = tif_to_array()
+##    assert a[3, 5, 19] == b[3, 5, 19]
+##    assert a[3, 5, 19] == c[3, 5, 19]
+    a = tif_to_array('test.tif')
+    print a
+    print a.shape
+    print a.dtype

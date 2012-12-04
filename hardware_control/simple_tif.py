@@ -12,14 +12,30 @@ Each slice in the TIF has its own header. However, all these headers
 are quite similar in my case, so I make a single header, and some
 pointers to the spots in the header that change:
 """
-header = numpy.fromstring('\n\x00\xfe\x00\x04\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x04\x00\x01\x00\x00\x00\x02\x00\x00\x00\x01\x01\x04\x00\x01\x00\x00\x00\x05\x00\x00\x00\x02\x01\x03\x00\x01\x00\x00\x00\x10\x00\x00\x00\x06\x01\x03\x00\x01\x00\x00\x00\x01\x00\x00\x00\x0e\x01\x02\x00?\x00\x00\x00\x86\x00\x00\x00\x11\x01\x04\x00\x01\x00\x00\x00\xc5\x00\x00\x00\x15\x01\x03\x00\x01\x00\x00\x00\x01\x00\x00\x00\x16\x01\x03\x00\x01\x00\x00\x00\x05\x00\x00\x00\x17\x01\x04\x00\x01\x00\x00\x00\x14\x00\x00\x00\x01\x00\x00\x00', dtype=numpy.byte)
+header = numpy.fromstring(
+    '\x0b\x00' + #Num tags = 11
+    '\xfe\x00\x04\x00\x01\x00\x00\x00\x00\x00\x00\x00' + #Type
+    '\x00\x01\x04\x00\x01\x00\x00\x00\x05\x00\x00\x00' + #Image width
+    '\x01\x01\x04\x00\x01\x00\x00\x00\x07\x00\x00\x00' + #Image length
+    '\x02\x01\x03\x00\x01\x00\x00\x00 \x00\x00\x00' + #Bits per sample
+    '\x06\x01\x03\x00\x01\x00\x00\x00\x01\x00\x00\x00' + #Photometric gibberish
+    '\x0e\x01\x02\x00;\x00\x00\x00\x92\x00\x00\x00' + #Im. descr. offset
+    '\x11\x01\x04\x00\x01\x00\x00\x00\xcd\x00\x00\x00' + #Strip offsets
+    '\x15\x01\x03\x00\x01\x00\x00\x00\x01\x00\x00\x00' + #Samples per pixel
+    '\x16\x01\x03\x00\x01\x00\x00\x00\x07\x00\x00\x00' + #Rows per strip
+    '\x17\x01\x04\x00\x01\x00\x00\x00\x8c\x00\x00\x00' + #Strip byte counts
+    'S\x01\x03\x00\x01\x00\x00\x00\x01\x00\x00\x00' + #Image data format
+    '\x15\x04\x00\x00', #Next IFD offset
+    dtype=numpy.byte)
 width = header[22:26].view(dtype=numpy.uint32)
 length = header[34:38].view(dtype=numpy.uint32)
+bits_per_sample = header[46:50].view(dtype=numpy.uint32)
 num_chars_in_image_description = header[66:70].view(numpy.uint32)
 strip_offset = header[82:86].view(numpy.uint32)
 rows_per_strip = header[106:110].view(numpy.uint32)
 strip_byte_counts = header[118:122].view(numpy.uint32)
-next_ifd_offset = header[122:126].view(numpy.uint32)
+data_format = header[130:134].view(numpy.uint32)
+next_ifd_offset = header[134:138].view(numpy.uint32)
 
 def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
     """
@@ -27,7 +43,6 @@ def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
     I usually use this for stacks of camera data.
     If the data is multi-color, then slices * channels must equal a.shape[0].
     """
-    assert a.dtype == numpy.uint16
     assert len(a.shape) == 3
     z, y, x = a.shape
     if slices is not None and channels is not None:
@@ -41,6 +56,27 @@ def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
     """
     width[0] = x
     length[0] = y
+    allowed_dtypes = {
+        numpy.dtype('uint8'): (1, 8),
+        numpy.dtype('uint16'): (1, 16),
+        numpy.dtype('uint32'): (1, 32),
+        numpy.dtype('uint64'): (1, 64),
+        numpy.dtype('int8'): (2, 8),
+        numpy.dtype('int16'): (2, 16),
+        numpy.dtype('int32'): (2, 32),
+        numpy.dtype('int64'): (2, 64),
+        numpy.dtype('float16'): (3, 16),
+        numpy.dtype('float32'): (3, 32),
+        numpy.dtype('float64'): (3, 64),
+        }
+    try:
+        data_format[0], bits_per_sample[0] = allowed_dtypes[a.dtype]
+    except KeyError:
+        warning_string = "Array datatype (%s) not allowed. Allowed types:"%(
+            a.dtype)
+        for i in sorted(allowed_dtypes.keys()):
+            warning_string += '\n ' + repr(i)
+        raise UserWarning(warning_string)
     if hyperstack:
         image_description = ''.join((
             'ImageJ=1.45s\nimages=%i\nchannels=%i\n'%(z, channels),
@@ -53,7 +89,7 @@ def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
     num_chars_in_image_description[0] = len(image_description)
     strip_offset[0] = 8 + header.nbytes + len(image_description)
     rows_per_strip[0] = y
-    strip_byte_counts[0] = x*y*2
+    strip_byte_counts[0] = x*y*bits_per_sample[0] // 8
     if z == 1:
         next_ifd_offset[0] = 0
     else:
@@ -64,7 +100,7 @@ def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
     header.tofile(f)
     f.write(image_description)
     a.tofile(f)
-    for which_header in range(2, z):
+    for which_header in range(1, z):
         if which_header == z-1:
             next_ifd_offset[0] = 0
         else:
@@ -166,7 +202,7 @@ def simple_tif_to_array(filename='out.tif', verbose=True):
     """
     A very simple reader. Note that this is ONLY designed to read
     TIFs written by 'array_to_tif' in this module. Writing a general
-    TIF reader is much harder.
+    TIF reader is much more work.
     """
     with open(filename, 'rb') as f:
         if verbose:
@@ -218,9 +254,14 @@ def parse_tags(t, ifd_offset, verbose=True):
     if verbose:
         print "IFD at offset", ifd_offset
     num_tags = bytes_to_int(t[ifd_offset:ifd_offset+2])
+    if verbose:
+        print "Full IFD:\n", repr(t[ifd_offset:ifd_offset + 6 + 12*num_tags])
+        print
     dtype = 'uint'
     for i in range(num_tags):
         tag = t[ifd_offset + 2 + 12*i:ifd_offset + 2 + 12*(i+1)]
+        if verbose:
+            print repr(tag)
         tag_code = bytes_to_int(tag[0:2])
         data_type = bytes_to_int(tag[2:4])
         num_values = bytes_to_int(tag[4:8])
@@ -343,15 +384,12 @@ def tif_to_array(filename='out.tif', verbose=False):
     return data.reshape(num_slices, ifd_info['length'], ifd_info['width'])
 
 if __name__ == '__main__':
-##    a = numpy.arange(7*800*900, dtype=numpy.uint16).reshape(7, 800, 900)
-##    print "Number of bytes:", a[0, :, :].nbytes
-##    array_to_tif(a)
-##    parse_simple_tif()
-##    b = simple_tif_to_array()
-##    c = tif_to_array()
-##    assert a[3, 5, 19] == b[3, 5, 19]
-##    assert a[3, 5, 19] == c[3, 5, 19]
-    a = tif_to_array('test.tif')
-    print a
-    print a.shape
-    print a.dtype
+    a = numpy.arange(7*800*900, dtype=numpy.float64).reshape(7, 800, 900)
+    array_to_tif(a)
+##    parse_tif()
+    b = tif_to_array(verbose=False)
+    print b.dtype, b.shape
+    assert a[3, 5, 19] == b[3, 5, 19]
+    print "Biggest difference:", abs(a - b).max()
+
+

@@ -54,6 +54,8 @@ def richardson_lucy_deconvolution(
         image_data, image_data_shape, image_data_dtype,
         output_name, verbose, config)
     output_basename, output_extension = os.path.splitext(output_name)
+    estimate_name = output_basename + '_estimate' + output_extension
+    history_name = output_basename + '_history' + output_extension
     if image_data == 'cancelled':
         print "Deconvolution cancelled.\n"
         return None
@@ -141,10 +143,14 @@ def richardson_lucy_deconvolution(
         print " Time:", end - start
         print " Done computing."
         print "Saving..."
-        estimate.tofile(output_basename + '_estimate' + output_extension)
         history[i+1, :, :] = estimate.max(axis=0) / (
             estimate.max(axis=0).mean())
-        history.tofile(output_basename + '_history' + output_extension)
+        if output_extension in ('.tif', '.tiff'):
+            array_to_tif(estimate.astype(numpy.float32), outfile=estimate_name)
+            array_to_tif(history.astype(numpy.float32), outfile=history_name)
+        else: #Use raw binary
+            estimate.tofile(estimate_name)
+            history.tofile(history_name)
         print "Done saving."
         sys.stdout.flush()
     return (estimate, history)
@@ -219,7 +225,10 @@ def image_data_as_array(
 
     if type(image_data) is str:
         if output_name is None:
-            output_name = os.path.splitext(image_data)[0] + '.raw'
+            head, tail = os.path.splitext(image_data)
+            if tail not in ('.tif', '.tiff'):
+                tail = '.raw'
+            output_name = head + tail
         while True:
             try:
                 image_data = image_filename_to_array(

@@ -1454,7 +1454,7 @@ def calculate_laser_intensity_drift(
     average_intensity = gaussian_filter(
         median_filter((image_data.sum(axis=2).sum(axis=1) -
                        bg.sum()),
-                      size=5)
+                      size=5),
         sigma=5)
     cPickle.dump(average_intensity,
                  open(output_filename, 'wb'), protocol=2)

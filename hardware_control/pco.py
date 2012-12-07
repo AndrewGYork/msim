@@ -515,33 +515,33 @@ class Edge:
                     raise TimeoutError(
                         "After %i polls, no buffer."%(poll_timeout),
                         num_acquired=num_acquired)
-            if dwStatusDrv.value == 0x0L:
-                pass
-            elif dwStatusDrv.value == 0x80332028:
-                """I should probably clear the buffer and give it back
-                to the driver with AddBufferEx..."""
-                raise DMAError('DMA error during record_to_memory')
-            else:
-                print "dwStatusDrv:", dwStatusDrv.value
-                raise UserWarning("Buffer status error")
+            try:
+                if dwStatusDrv.value == 0x0L:
+                    pass
+                elif dwStatusDrv.value == 0x80332028:
+                    raise DMAError('DMA error during record_to_memory')
+                else:
+                    print "dwStatusDrv:", dwStatusDrv.value
+                    raise UserWarning("Buffer status error")
 
-            if verbose:
-                print "Record to memory result:",
-                print hex(dwStatusDll.value), hex(dwStatusDrv.value), message
+                if verbose:
+                    print "Record to memory result:",
+                    print hex(dwStatusDll.value), hex(dwStatusDrv.value),
+                    print message
 
-            if which_im >= preframes:
-                buf = buffer_from_memory(self.buffer_pointers[which_buf],
-                                         2*(out.shape[1]*out.shape[2]))
-                out[(first_frame + (which_im - preframes))%out.shape[0],
-                    :, :] = numpy.frombuffer(
-                        buf, numpy.uint16).reshape(out.shape[1:])
-                num_acquired += 1
-
-            PCO_api.PCO_AddBufferEx(#Put the buffer back in the queue
-                self.camera_handle, dw1stImage, dwLastImage,
-                self.buffer_numbers[which_buf], self.wXRes, self.wYRes,
-                wBitsPerPixel)
-            added_buffers.append(which_buf)
+                if which_im >= preframes:
+                    buf = buffer_from_memory(self.buffer_pointers[which_buf],
+                                             2*(out.shape[1]*out.shape[2]))
+                    out[(first_frame + (which_im - preframes))%out.shape[0],
+                        :, :] = numpy.frombuffer(
+                            buf, numpy.uint16).reshape(out.shape[1:])
+                    num_acquired += 1
+            finally:
+                PCO_api.PCO_AddBufferEx(#Put the buffer back in the queue
+                    self.camera_handle, dw1stImage, dwLastImage,
+                    self.buffer_numbers[which_buf], self.wXRes, self.wYRes,
+                    wBitsPerPixel)
+                added_buffers.append(which_buf)
         return out
 
     def get_shutter_mode(self, verbose=True):

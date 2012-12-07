@@ -1520,6 +1520,8 @@ def spot_intensity_vs_scan_position(
         if hot_pixels is not None:
             bg = remove_hot_pixels(bg, hot_pixels)
         print "Background image complete."
+        print "Saving", os.path.split(background_name)[1]
+        bg.tofile(background_name)
         lake_image_data = load_image_data(
             lake_filename, xPix, yPix, zPix, preframes)
         lake_average_intensity = calculate_laser_intensity_drift(
@@ -1580,8 +1582,6 @@ def spot_intensity_vs_scan_position(
         print "\nSaving", os.path.split(lake_intensities_name)[1]
         cPickle.dump(intensities_vs_scan_position,
                      open(lake_intensities_name, 'wb'), protocol=2)
-        print "Saving", os.path.split(background_name)[1]
-        bg.tofile(background_name)
     if display:
         fig=pylab.figure()
         num_lines = 0

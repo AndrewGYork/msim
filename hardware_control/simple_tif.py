@@ -335,7 +335,7 @@ def parse_tags(t, ifd_offset, verbose=True):
         }
     return num_tags, ifd_info
 
-def tif_to_array(filename='out.tif', verbose=False):
+def tif_to_array(filename='out.tif', verbose=False, return_info=False):
     """
     A very simple reader. Note that this is ONLY designed to read
     TIFs written by 'array_to_tif' in this module. Writing a general
@@ -381,7 +381,11 @@ def tif_to_array(filename='out.tif', verbose=False):
     else:
         raise UserWarning("The data is not written as one continuous block")
     num_slices = data.size // (ifd_info['length'] * ifd_info['width'])
-    return data.reshape(num_slices, ifd_info['length'], ifd_info['width'])
+    if return_info:
+        return (data.reshape(num_slices, ifd_info['length'], ifd_info['width']),
+                ifd_info)
+    else:
+        return data.reshape(num_slices, ifd_info['length'], ifd_info['width'])
 
 if __name__ == '__main__':
     a = numpy.arange(7*800*900, dtype=numpy.float64).reshape(7, 800, 900)
@@ -389,6 +393,15 @@ if __name__ == '__main__':
 ##    parse_tif()
     b = tif_to_array(verbose=False)
     print b.dtype, b.shape
+    assert a[3, 5, 19] == b[3, 5, 19]
+    print "Biggest difference:", abs(a - b).max()
+
+    a = numpy.arange(6*800*900, dtype=numpy.float64).reshape(6, 800, 900)
+    array_to_tif(a, slices=2, channels=3)
+##    parse_tif()
+    b, info = tif_to_array(verbose=False, return_info=True)
+    print b.dtype, b.shape
+    print info
     assert a[3, 5, 19] == b[3, 5, 19]
     print "Biggest difference:", abs(a - b).max()
 

@@ -23,6 +23,7 @@ def richardson_lucy_deconvolution(
     verbose=True,
     output_name=None,
     tk_master=None,
+    which_channel = 'all'
     ):
     """Deconvolve a 2D or 3D image using the Richardson-Lucy algorithm
     from an image and a point-spread funciton (PSF)
@@ -50,7 +51,7 @@ def richardson_lucy_deconvolution(
         tk_master.withdraw()
 
     config = get_config()
-    image_data, output_name = image_data_as_array(
+    image_data, output_name, num_channels = image_data_as_array(
         image_data, image_data_shape, image_data_dtype,
         output_name, verbose, config)
     output_basename, output_extension = os.path.splitext(output_name)
@@ -86,7 +87,7 @@ def richardson_lucy_deconvolution(
                         " numbers with one entry for each dimension" +
                         " of the input image.")
     else:
-        psf_data, trash = image_data_as_array(
+        psf_data, trash, trash = image_data_as_array(
             psf_data, psf_data_shape, psf_data_dtype,
             output_name=None, verbose=verbose, config=config,
             title='Select a PSF file', initialfile='psf.tif')
@@ -115,10 +116,6 @@ def richardson_lucy_deconvolution(
         save_config(config)
         "Number of iterations to perform:", num_iterations
 
-    estimate = image_data.copy()
-    history = numpy.zeros((num_iterations + 1,) + (image_data.shape[1:]))
-    history[0, :, :] = estimate.max(axis=0) / estimate.max(axis=0).mean()
-
     if psf_data != 'gaussian':
         print "Precomputing..."
         start = clock()
@@ -127,33 +124,60 @@ def richardson_lucy_deconvolution(
         end = clock()
         print "Done precomputing. Time:", end - start
 
-    for i in range(num_iterations):
-        print "Computing iteration %i..."%i
-        start = clock()
-        if psf_data == 'gaussian':
-            blurred_estimate = gaussian_filter(estimate, sigma=psf_sigma)
-            estimate *= gaussian_filter((image_data /
-                                         blurred_estimate), sigma=psf_sigma)
-        else:
-            blurred_estimate = ifftn(psf_data_fft * fftn(estimate)).real
-            estimate *= ifftn(psf_data_fft_r * fftn(image_data /
-                                                    blurred_estimate)
-                              ).real
-        end = clock()
-        print " Time:", end - start
-        print " Done computing."
-        print "Saving..."
-        history[i+1, :, :] = estimate.max(axis=0) / (
-            estimate.max(axis=0).mean())
-        if output_extension in ('.tif', '.tiff'):
-            array_to_tif(estimate.astype(numpy.float32), outfile=estimate_name)
-            array_to_tif(history.astype(numpy.float32), outfile=history_name)
-        else: #Use raw binary
-            estimate.tofile(estimate_name)
-            history.tofile(history_name)
-        print "Done saving."
-        sys.stdout.flush()
-    return (estimate, history)
+    assert which_channel == 'all' or which_channel < num_channels
+    if num_channels > 1 and which_channel != 'all':
+        """Pick out just one color channel to deconvolve"""
+        image_data = image_data[which_channel::num_channels, :, :]
+        num_channels = 1
+
+    if which_channel == 'all' and num_channels > 1:
+        data_slices = image_data.shape[0] // num_channels
+        history_slices = num_iterations + 1
+        channels = num_channels
+    else:
+        slices = None
+        channels = None
+
+    full_estimate = image_data.copy()
+    history = numpy.zeros((num_channels * (num_iterations + 1),) +
+                          (image_data.shape[1:]))
+    for c in range(num_channels):
+        estimate = full_estimate[c::num_channels, :, :]
+        image_channel = image_data[c::num_channels, :, :]
+        history[c, :, :] = (estimate.max(axis=0) /
+                            estimate.max(axis=0).mean())
+
+        for i in range(num_iterations):
+            print "Computing iteration %i..."%i
+            start = clock()
+            if psf_data == 'gaussian':
+                blurred_estimate = gaussian_filter(estimate, sigma=psf_sigma)
+                estimate *= gaussian_filter((image_channel /
+                                             blurred_estimate), sigma=psf_sigma)
+            else:
+                blurred_estimate = ifftn(psf_data_fft * fftn(estimate)).real
+                estimate *= ifftn(psf_data_fft_r * fftn(image_channel /
+                                                        blurred_estimate)
+                                  ).real
+            end = clock()
+            print " Time:", end - start
+            print " Done computing."
+            print "Saving..."
+            history[(i+1)*num_channels + c, :, :] = estimate.max(axis=0) / (
+                estimate.max(axis=0).mean())
+            if output_extension in ('.tif', '.tiff'):
+                array_to_tif(
+                    full_estimate.astype(numpy.float32), outfile=estimate_name,
+                    slices=data_slices, channels=channels)
+                array_to_tif(
+                    history.astype(numpy.float32), outfile=history_name,
+                    slices=history_slices, channels=channels)
+            else: #Use raw binary
+                full_estimate.tofile(estimate_name)
+                history.tofile(history_name)
+            print "Done saving."
+            sys.stdout.flush()
+    return (full_estimate, history)
 
 def condition_psf_data(psf_data, new_shape=None):
     """Prepare the PSF for FFT-based convolution.
@@ -221,7 +245,7 @@ def image_data_as_array(
         if master is None:
             root.destroy()
         if image_data == '.':
-            return 'cancelled', None
+            return 'cancelled', None, None
 
     if type(image_data) is str:
         if output_name is None:
@@ -231,7 +255,7 @@ def image_data_as_array(
             output_name = head + tail
         while True:
             try:
-                image_data = image_filename_to_array(
+                image_data, num_channels = image_filename_to_array(
                     image_data,
                     shape=image_data_shape,
                     dtype=image_data_dtype,
@@ -242,13 +266,13 @@ def image_data_as_array(
             except UserWarning as e:
                 print e
         if image_data == 'cancelled':
-            return 'cancelled', None
+            return 'cancelled', None, None
     else:
         if output_name is None:
             output_name = os.path.join(os.path.getcwd(), 'deconvolution.raw')
     print image_data.shape
     assert type(image_data) is numpy.ndarray
-    return image_data, output_name
+    return image_data, output_name, num_channels
 
 def image_filename_to_array(
     image_filename, shape=None, dtype=None,
@@ -259,13 +283,19 @@ def image_filename_to_array(
         print "Loading %s..."%(os.path.split(image_filename)[1])
     extension = os.path.splitext(image_filename)[1]
     if extension in ('.tif', '.tiff'):
-        return tif_to_array(image_filename)
+        a, info = tif_to_array(image_filename, return_info=True)
+        info = dict([x.split('=') for x in info['description'].split('\n')
+                if len(x.split('=')) > 1])
+        if verbose and info.get('channels', 1) > 1:
+            print "Image data seems to be an ImageJ hyperstack",
+            print " with multiple colors."
+        return a, int(info['channels'])
     elif extension in ('.raw', '.dat'):
         if (shape is None) or (dtype is None):
             info = get_image_info(
                 image_filename, config=config, master=master)
             if info == 'cancelled':
-                return 'cancelled'
+                return 'cancelled', None
             xy_shape, dtype_name = info
             config.set('File', 'last_leftright_shape', repr(xy_shape[1]))
             config.set('File', 'last_updown_shape', repr(xy_shape[0]))
@@ -289,7 +319,7 @@ def image_filename_to_array(
             raise UserWarning("The given shape and datatype do not match" +
                               " the size of %s"%(
                                   os.path.split(image_filename)[1]))
-        return data
+        return data, 1 #Multi-channel raw is probably to be avoided
     else:
         raise UserWarning("Extension '%s' not recognized.\n"%(extension) +
                           "File extension must be one of:\n"

@@ -135,7 +135,8 @@ def richardson_lucy_deconvolution(
         history_slices = num_iterations + 1
         channels = num_channels
     else:
-        slices = None
+        data_slices = None
+        history_slices = None
         channels = None
 
     full_estimate = image_data.copy()
@@ -286,10 +287,13 @@ def image_filename_to_array(
         a, info = tif_to_array(image_filename, return_info=True)
         info = dict([x.split('=') for x in info['description'].split('\n')
                 if len(x.split('=')) > 1])
-        if verbose and info.get('channels', 1) > 1:
+        if verbose and int(info.get('channels', 1)) > 1:
             print "Image data seems to be an ImageJ hyperstack",
             print " with multiple colors."
-        return a, int(info['channels'])
+            channels = int(info['channels'])
+        else:
+            channels = 1
+        return a, channels
     elif extension in ('.raw', '.dat'):
         if (shape is None) or (dtype is None):
             info = get_image_info(

@@ -65,7 +65,7 @@ def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
         numpy.dtype('int16'): (2, 16),
         numpy.dtype('int32'): (2, 32),
         numpy.dtype('int64'): (2, 64),
-        numpy.dtype('float16'): (3, 16),
+        ##numpy.dtype('float16'): (3, 16), #Not supported in older numpy?
         numpy.dtype('float32'): (3, 32),
         numpy.dtype('float64'): (3, 64),
         }

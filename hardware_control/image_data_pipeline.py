@@ -10,7 +10,10 @@ import simple_tif
 from arrayimage import ArrayInterfaceImage
 
 """
-Add a real description here!
+Acquiring and displaying data from a camera is a common problem our
+lab has to solve. This module provides a common framework for parallel
+acquisition, display, and saving at their own paces, without enforced
+synchronization.
 """
 
 
@@ -100,6 +103,12 @@ class Image_Data_Pipeline:
                 break
             else:
                 info("Buffer %i idle"%(self.idle_buffers[-1]))
+        return None
+
+    def set_display_intensity_scaling(self, scaling, display_min, display_max):
+        args = locals()
+        args.pop('self')
+        self.display.commands.send(('set_intensity_scaling', args))
         return None
 
     def close(self):
@@ -396,7 +405,7 @@ class Display:
         self.output_queue = output_queue
         self.commands = commands
 
-        self.make_linear_lookup_table(display_min=0, display_max=2**16-1)
+        self.set_intensity_scaling('linear', display_min=0, display_max=2**16-1)
 
         self.current_display_buffer = 1
         self.switch_buffers(0)
@@ -431,6 +440,9 @@ class Display:
         return None
 
     def update(self, dt):
+        if self.commands.poll():
+            self.execute_external_command()
+            return None
         try:
             switch_to_me = self.input_queue.get_nowait()
         except Queue.Empty:
@@ -440,7 +452,24 @@ class Display:
         else:
             self.switch_buffers(switch_to_me)
             self.convert_to_8_bit()
+        return None
 
+    def execute_external_command(self):
+        """
+        The command should be a 2-tuple. The first element of the
+        tuple is a string naming the command. The second element of
+        the tuple is a dict of arguments to the command.
+        """
+        cmd, args = self.commands.recv()
+        if cmd == 'set_intensity_scaling':
+            self.set_intensity_scaling(**args)
+        elif cmd == 'get_intensity_scaling':
+            self.commands.send((self.intensity_scaling,
+                                self.display_min,
+                                self.display_max))
+        else:
+            raise UserWarning("Command not recognized: %s, %s"%(
+                repr(cmd), repr(args)))
         return None
 
     def switch_buffers(self, switch_to_me):
@@ -470,7 +499,11 @@ class Display:
         """
         if not hasattr(self, 'display_data_8'):
             self.display_data_8 = np.empty(
-                self.buffer_shape[1:], dtype=np.uint8)            
+                self.buffer_shape[1:], dtype=np.uint8)
+        if self.intensity_scaling == 'autoscale':
+            self.display_min = self.display_data_16.min()
+            self.display_max = self.display_data_16.max()
+            self._make_linear_lookup_table()
         np.take(self.lut, self.display_data_16, out=self.display_data_8)
         self.image = ArrayInterfaceImage(self.display_data_8, allow_copy=False)
         pyglet.gl.glTexParameteri( #Reset to no interpolation
@@ -479,7 +512,23 @@ class Display:
                 pyglet.gl.GL_NEAREST)
         return None
 
-    def make_linear_lookup_table(self, display_min, display_max):
+    def set_intensity_scaling(self, scaling, display_min, display_max):
+        if scaling == 'linear':
+            self.intensity_scaling = 'linear'
+            if display_min is not None and display_max is not None:
+                self.display_min = display_min
+                self.display_max = display_max
+                self._make_linear_lookup_table()
+        elif scaling == 'autoscale':
+            self.intensity_scaling = 'autoscale'
+            self.display_min = self.display_data_16.min()
+            self.display_max = self.display_data_16.max()
+            self._make_linear_lookup_table()
+        else:
+            raise UserWarning("Scaling not recognized:, %s"%(repr(scaling)))
+        return None
+    
+    def _make_linear_lookup_table(self):
         """
         Waaaaay faster than how I was doing it before.
         http://stackoverflow.com/q/14464449/513688
@@ -490,10 +539,11 @@ class Display:
             self._lut_intermediate = self._lut_start.copy()
         if not hasattr(self, 'lut'):
             self.lut = np.empty(2**16, dtype=np.uint8)
-        np.clip(self._lut_start, display_min, display_max,
+        np.clip(self._lut_start, self.display_min, self.display_max,
                 out=self._lut_intermediate)
-        self._lut_intermediate -= display_min
-        self._lut_intermediate //= (display_max - display_min + 1.) / 256.
+        self._lut_intermediate -= self.display_min
+        self._lut_intermediate //= (
+            self.display_max - self.display_min + 1.) / 256.
         self.lut[:] = self._lut_intermediate.view(np.uint8)[::2]
         return None
 
@@ -532,7 +582,12 @@ def file_saving_child_process(
     output_queue,
     commands,
     ):
+    file_info = []
     while True:
+        if self.commands.poll():
+            cmd, args = self.commands.recv()
+            if cmd == 'file_info':
+                file_info.append(args)
         try:
             process_me = input_queue.get_nowait()
         except Queue.Empty:
@@ -541,12 +596,23 @@ def file_saving_child_process(
         if process_me is None:
             break
         else:
-            """Copy the buffer to disk"""
             info("start buffer %i"%(process_me))
-            with data_buffers[process_me].get_lock():
-                a = np.frombuffer(data_buffers[process_me].get_obj(),
-                                  dtype=np.uint16).reshape(buffer_shape)
-##                simple_tif.array_to_tif(a, 'out.tif')
+            if len(file_info) > 0:
+                """
+                We only save the file if we have information for it.
+                """
+                args = file_info.pop(0)
+                save_me = args.pop('buffer_number')
+                if save_me != process_me:
+                    raise UserWarning(
+                        "Attempting to save buffer %i" +
+                        " with information for buffer %i"%(process_me, save_me))
+                info("saving buffer %i"%(process_me))
+                """Copy the buffer to disk"""
+                with data_buffers[process_me].get_lock():
+                    a = np.frombuffer(data_buffers[process_me].get_obj(),
+                                      dtype=np.uint16).reshape(buffer_shape)
+                    simple_tif.array_to_tif(a, **args)
             info("end buffer %i"%(process_me))
             output_queue.put(process_me)
     return None

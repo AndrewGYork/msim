@@ -28,7 +28,7 @@ else:
 class Image_Data_Pipeline:
     def __init__(
         self,
-        num_data_buffers=100,
+        num_buffers=100,
         buffer_shape=(60, 256, 512),
         ):
         """
@@ -36,12 +36,12 @@ class Image_Data_Pipeline:
         8-bit buffers for display data.
         """
         self.buffer_shape = buffer_shape
-        self.num_data_buffers = num_data_buffers
+        self.num_data_buffers = num_buffers
         
         pix_per_buf = np.prod(buffer_shape)
         self.data_buffers = [mp.Array(ctypes.c_uint16, pix_per_buf)
-                             for b in range(num_data_buffers)]
-        self.idle_buffers = range(num_data_buffers)
+                             for b in range(self.num_data_buffers)]
+        self.idle_buffers = range(self.num_data_buffers)
         
         self.accumulation_buffers = [mp.Array(ctypes.c_uint16, pix_per_buf)
                                      for b in range(2)]
@@ -80,7 +80,15 @@ class Image_Data_Pipeline:
             self.projection.display_buffer_input_queue)
         return None
     
-    def load_data_buffers(self, N, timeout=0):
+    def load_data_buffers(self, N, timeout=0, file_saving_info=None):
+        if file_saving_info is not None:
+            if len(file_saving_info) != N:
+                raise UserWarning(
+                    "If file saving info is provided, it must match the number" +
+                    " of buffers loaded.")
+            else:
+                for i in file_saving_info:
+                    self.file_saving.commands.send(('file_info', i))
         """
         Feed the pipe!
         """
@@ -105,7 +113,8 @@ class Image_Data_Pipeline:
                 info("Buffer %i idle"%(self.idle_buffers[-1]))
         return None
 
-    def set_display_intensity_scaling(self, scaling, display_min, display_max):
+    def set_display_intensity_scaling(
+        self, scaling, display_min=None, display_max=None):
         args = locals()
         args.pop('self')
         self.display.commands.send(('set_intensity_scaling', args))
@@ -584,8 +593,9 @@ def file_saving_child_process(
     ):
     file_info = []
     while True:
-        if self.commands.poll():
-            cmd, args = self.commands.recv()
+        if commands.poll():
+            cmd, args = commands.recv()
+            info("%s %s"%(repr(cmd), repr(args)))
             if cmd == 'file_info':
                 file_info.append(args)
         try:

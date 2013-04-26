@@ -54,9 +54,6 @@ def richardson_lucy_deconvolution(
     image_data, output_name, num_channels = image_data_as_array(
         image_data, image_data_shape, image_data_dtype,
         output_name, verbose, config)
-    output_basename, output_extension = os.path.splitext(output_name)
-    estimate_name = output_basename + '_estimate' + output_extension
-    history_name = output_basename + '_history' + output_extension
     if image_data == 'cancelled':
         print "Deconvolution cancelled.\n"
         return None
@@ -65,7 +62,10 @@ def richardson_lucy_deconvolution(
             raise UserWarning("Image data has negative elements!\n" + 
                 "This violates the assumptions of Richardson-Lucy deconvolution.")
         image_data = 1e-12 + image_data.astype(numpy.float64)
-
+    output_basename, output_extension = os.path.splitext(output_name)
+    estimate_name = output_basename + '_estimate' + output_extension
+    history_name = output_basename + '_history' + output_extension
+    
     if psf_data is None:
         psf_data = ask_psf_type(config, master=tk_master)
         if psf_data == 'cancelled':

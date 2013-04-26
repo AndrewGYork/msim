@@ -626,11 +626,11 @@ def get_config():
         while True:
             try:
                 config.get(section, option)
+                break
             except ConfigParser.NoSectionError:
                 config.add_section(section)
             except ConfigParser.NoOptionError:
                 config.set(section, option, default)
-            break
     save_config(config)
     return config
 

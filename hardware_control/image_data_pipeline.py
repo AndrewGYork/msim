@@ -4,6 +4,10 @@ import ctypes
 import Queue
 import multiprocessing as mp
 import numpy as np
+try:
+    from scipy import ndimage
+except ImportError:
+    ndimage = None
 import pyglet
 import simple_tif
 from arrayimage import ArrayInterfaceImage
@@ -125,6 +129,11 @@ class Image_Data_Pipeline:
         args.pop('self')
         self.display.commands.send(('set_intensity_scaling', args))
         return None
+
+    def get_display_intensity_scaling(self):
+        args = {}
+        self.display.commands.send(('get_intensity_scaling', args))
+        return self.display.commands.recv()
 
     def close(self):
         self.camera.input_queue.put(None)
@@ -520,6 +529,12 @@ class Display:
             self.display_min = self.display_data_16.min()
             self.display_max = self.display_data_16.max()
             self._make_linear_lookup_table()
+        elif self.intensity_scaling == 'median_filter_autoscale':
+            filtered_image = ndimage.filters.median_filter(
+                self.display_data_16, size=3)
+            self.display_min = filtered_image.max()
+            self.display_max = filtered_image.max()
+            self._make_linear_lookup_table()
         np.take(self.lut, self.display_data_16, out=self.display_data_8)
         self.image = ArrayInterfaceImage(self.display_data_8, allow_copy=False)
         pyglet.gl.glTexParameteri( #Reset to no interpolation
@@ -540,8 +555,22 @@ class Display:
             self.display_min = self.display_data_16.min()
             self.display_max = self.display_data_16.max()
             self._make_linear_lookup_table()
+        elif scaling == 'median_filter_autoscale':
+            if ndimage is None:
+                info("Median filter autoscale requires Scipy. " +
+                     "Using min/max autoscale.")
+                self.intensity_scaling = 'autoscale'
+                self.display_min = self.display_data_16.min()
+                self.display_max = self.display_data_16.max()
+            else:
+                filtered_image = ndimage.filters.median_filter(
+                    self.display_data_16, size=3)
+                self.display_min = filtered_image.min()
+                self.display_max = filtered_image.max()
         else:
             raise UserWarning("Scaling not recognized:, %s"%(repr(scaling)))
+        if hasattr(self, 'display_data_16'):
+            self.convert_to_8_bit()
         return None
     
     def _make_linear_lookup_table(self):

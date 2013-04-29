@@ -522,19 +522,19 @@ class Display:
         """
         Convert 16-bit display data to 8-bit using a lookup table.
         """
-        if not hasattr(self, 'display_data_8'):
-            self.display_data_8 = np.empty(
-                self.buffer_shape[1:], dtype=np.uint8)
         if self.intensity_scaling == 'autoscale':
             self.display_min = self.display_data_16.min()
             self.display_max = self.display_data_16.max()
             self._make_linear_lookup_table()
         elif self.intensity_scaling == 'median_filter_autoscale':
             filtered_image = ndimage.filters.median_filter(
-                self.display_data_16, size=3)
-            self.display_min = filtered_image.max()
-            self.display_max = filtered_image.max()
+                self.display_data_16, size=3, output=self.filtered_image)
+            self.display_min = self.filtered_image.min()
+            self.display_max = self.filtered_image.max()
             self._make_linear_lookup_table()
+        if not hasattr(self, 'display_data_8'):
+            self.display_data_8 = np.empty(
+                self.buffer_shape[1:], dtype=np.uint8)
         np.take(self.lut, self.display_data_16, out=self.display_data_8)
         self.image = ArrayInterfaceImage(self.display_data_8, allow_copy=False)
         pyglet.gl.glTexParameteri( #Reset to no interpolation
@@ -547,6 +547,14 @@ class Display:
         if scaling == 'linear':
             self.intensity_scaling = 'linear'
             if display_min is not None and display_max is not None:
+                if display_min < 0:
+                    display_min = 0
+                if display_min > (2**16 - 2):
+                    display_min = (2**16 - 2)
+                if display_max <= display_min:
+                    display_max = display_min + 1
+                if display_max > (2**16 - 1):
+                    display_max = 2**16 - 1
                 self.display_min = display_min
                 self.display_max = display_max
                 self._make_linear_lookup_table()
@@ -563,10 +571,15 @@ class Display:
                 self.display_min = self.display_data_16.min()
                 self.display_max = self.display_data_16.max()
             else:
+                self.intensity_scaling = 'median_filter_autoscale'
+                if not hasattr(self, 'filtered_image'):
+                    self.filtered_image = np.empty(
+                        self.buffer_shape[1:], dtype=np.uint16)
                 filtered_image = ndimage.filters.median_filter(
-                    self.display_data_16, size=3)
-                self.display_min = filtered_image.min()
-                self.display_max = filtered_image.max()
+                    self.display_data_16, size=3, output=self.filtered_image)
+                self.display_min = self.filtered_image.min()
+                self.display_max = self.filtered_image.max()
+            self._make_linear_lookup_table()
         else:
             raise UserWarning("Scaling not recognized:, %s"%(repr(scaling)))
         if hasattr(self, 'display_data_16'):

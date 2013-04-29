@@ -1,13 +1,16 @@
 import sys
 import time
 import ctypes
-import logging
 import Queue
 import multiprocessing as mp
 import numpy as np
 import pyglet
 import simple_tif
 from arrayimage import ArrayInterfaceImage
+try:
+    from camera_child_process import camera_child_process
+except ImportError:
+    camera_child_process = None
 
 """
 Acquiring and displaying data from a camera is a common problem our
@@ -53,6 +56,9 @@ class Image_Data_Pipeline:
         """
         Lauch the child processes that make up the pipeline
         """
+        if camera_child_process is None:
+            print "Couldn't load camera_child_process.py."
+            print "Using default dummy camera."
         self.camera = Data_Pipeline_Camera(
             data_buffers=self.data_buffers, buffer_shape=self.buffer_shape)
         self.accumulation = Data_Pipeline_Accumulation(
@@ -162,41 +168,42 @@ class Data_Pipeline_Camera:
             name='Camera')
         self.child.start()
         return None
-
-def camera_child_process(
-    data_buffers,
-    buffer_shape,
-    input_queue,
-    output_queue,
-    commands,
-    ):
-    data = [np.zeros(buffer_shape, dtype=np.uint16)
-            for i in range(100)]
-    for i, d in enumerate(data):
-        d.fill(int((2**16 - 1) * (i + 1.0) / len(data)))
-    data_idx = -1
-    while True:
-        try:
-            process_me = input_queue.get_nowait()
-        except Queue.Empty:
-            time.sleep(0.0005)
-            continue
-        if process_me is None:
-            break #We're done
-        else:
-            """Fill the buffer with something"""
-            info("start buffer %i"%(process_me))
-            with data_buffers[process_me].get_lock():
-                a = np.frombuffer(data_buffers[process_me].get_obj(),
-                                  dtype=np.uint16).reshape(buffer_shape)
-##                a.fill(1)
-                data_idx += 1
-                data_idx = data_idx %len(data)
-                a[:] = data[data_idx]
-##            time.sleep(0.013)
-            info("end buffer %i"%(process_me))
-            output_queue.put(process_me)
-    return None
+    
+if camera_child_process is None:
+    def camera_child_process(
+        data_buffers,
+        buffer_shape,
+        input_queue,
+        output_queue,
+        commands,
+        ):
+        data = [np.zeros(buffer_shape, dtype=np.uint16)
+                for i in range(100)]
+        for i, d in enumerate(data):
+            d.fill(int((2**16 - 1) * (i + 1.0) / len(data)))
+        data_idx = -1
+        while True:
+            try:
+                process_me = input_queue.get_nowait()
+            except Queue.Empty:
+                time.sleep(0.0005)
+                continue
+            if process_me is None:
+                break #We're done
+            else:
+                """Fill the buffer with something"""
+                info("start buffer %i"%(process_me))
+                with data_buffers[process_me].get_lock():
+                    a = np.frombuffer(data_buffers[process_me].get_obj(),
+                                      dtype=np.uint16).reshape(buffer_shape)
+    ##                a.fill(1)
+                    data_idx += 1
+                    data_idx = data_idx %len(data)
+                    a[:] = data[data_idx]
+    ##            time.sleep(0.013)
+                info("end buffer %i"%(process_me))
+                output_queue.put(process_me)
+        return None
 
 class Data_Pipeline_Accumulation:
     def __init__(
@@ -626,3 +633,18 @@ def file_saving_child_process(
             info("end buffer %i"%(process_me))
             output_queue.put(process_me)
     return None
+
+if __name__ == '__main__':
+    import logging
+    logger = mp.log_to_stderr()
+    logger.setLevel(logging.INFO)
+
+    idp = Image_Data_Pipeline()
+    while True:
+        try:
+            idp.load_data_buffers(len(idp.idle_buffers))
+            idp.collect_data_buffers()
+            time.sleep(0.1)
+        except KeyboardInterrupt:
+            break
+    idp.close()

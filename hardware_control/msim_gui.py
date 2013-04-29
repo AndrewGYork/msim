@@ -47,6 +47,8 @@ class GUI:
 ##            command=self.load_and_save)
 ##        a.pack(side=tk.LEFT)
 ##
+        self.data_pipeline.set_display_intensity_scaling(
+            'median_filter_autoscale', display_min=0, display_max=0)
         self.root.mainloop()
         self.data_pipeline.close()
         return None
@@ -87,6 +89,9 @@ class Display_Settings_Window:
         self.root.wm_title("Display settings")
         self.root.bind("<Escape>", lambda x: self.root.destroy())
 
+        scaling, display_min, display_max = (
+            self.parent.data_pipeline.get_display_intensity_scaling())
+
         frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=4)
         frame.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
         a = tk.Label(frame, text="Contrast settings:")
@@ -96,7 +101,7 @@ class Display_Settings_Window:
         a = tk.Label(master=subframe, text='Lower\nlimit:')
         a.pack(side=tk.LEFT)
         self.display_min = Scale_Spinbox(
-            subframe, from_=0, to=(2**16 - 1), initial_value=0)
+            subframe, from_=0, to=(2**16 - 1), initial_value=display_min)
         self.display_min.bind(
             "<<update>>", lambda x: self.set_scaling())
         self.display_min.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
@@ -105,7 +110,7 @@ class Display_Settings_Window:
         a = tk.Label(master=subframe, text='Upper\nlimit:')
         a.pack(side=tk.LEFT)
         self.display_max = Scale_Spinbox(
-            subframe, from_=0, to=(2**16 - 1), initial_value=(2**16 - 1))
+            subframe, from_=0, to=(2**16 - 1), initial_value=display_max)
         self.display_max.bind(
             "<<update>>", lambda x: self.set_scaling())
         self.display_max.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
@@ -114,8 +119,7 @@ class Display_Settings_Window:
         a = tk.Label(master=subframe, text='Mode:')
         a.pack(side=tk.LEFT)
         self.scaling = tk.StringVar()
-        self.old_scaling = 'linear'
-        self.scaling.set('median_filter_autoscale')
+        self.scaling.set(scaling)
         button = tk.Radiobutton(
             master=subframe, text='Linear', variable=self.scaling,
             value='linear', indicatoron=0,
@@ -132,7 +136,6 @@ class Display_Settings_Window:
             command=lambda: self.root.after_idle(self.set_scaling))
         button.pack(side=tk.LEFT)
 
-        self.set_scaling()
         self.update_scaling()
         return None
     
@@ -141,14 +144,25 @@ class Display_Settings_Window:
             self.scaling.get(),
             display_min=self.display_min.get(),
             display_max=self.display_max.get())
+        """
+        Now we make sure the changes were accepted.
+        """
+        scaling, display_min, display_max = (
+            self.parent.data_pipeline.get_display_intensity_scaling())
+        print repr(scaling)
+        print repr(display_min)
+        print repr(display_max)
+        self.scaling.set(scaling)
+        self.display_min.set(int(display_min), update_trigger=False)
+        self.display_max.set(int(display_max), update_trigger=False)
         return None
 
     def update_scaling(self):
         scaling, display_min, display_max = (
             self.parent.data_pipeline.get_display_intensity_scaling())
-        self.scaling.set(scaling)
-        self.display_min.set(display_min)
-        self.display_max.set(display_max)
+        if scaling != 'linear':
+            self.display_min.set(display_min)
+            self.display_max.set(display_max)
         self.root.after(400, self.update_scaling)
         return None
     

@@ -70,8 +70,35 @@ class GUI:
             else:
                 self.laser_on[c].set(0)
             a.pack(side=tk.LEFT)
-            
+            self.lake_info[c] = {}
+            self.lake_info[c]['button'] = tk.Button(
+                subframe, text='Calibrate',bg='red', fg='white',
+                command=lambda: self.root.after_idle(self.calibrate))
+            self.lake_info[c]['button'].pack(side=tk.LEFT)
 
+##        self.exposure_time_milliseconds = 4.5
+##        subframe = Tk.Frame(frame)
+##        subframe.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+##        self.galvo_num_sweeps_label = Tk.Label(subframe, text='')
+##        self.galvo_num_sweeps_label.pack(side=Tk.LEFT)
+##        self.num_galvo_sweeps = Scale_Spinbox(
+##            subframe, from_=1, to=50, increment=1, initial_value=2)
+##        self.num_galvo_sweeps.spinbox.config(width=2)
+##        self.num_galvo_sweeps.bind(
+##            "<<update>>", lambda x: self.root.after_idle(
+##                self.set_num_galvo_sweeps))
+##        self.num_galvo_sweeps.pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
+##        self.galvo_num_sweeps_label.config(
+##            text='Exposure:\n%i sweeps\n%0.2f ms each\n%0.2f ms total'%(
+##                self.num_galvo_sweeps.get(), self.galvo_sweep_milliseconds,
+##                self.num_galvo_sweeps.get()* self.galvo_sweep_milliseconds))
+##        a.pack(side=Tk.LEFT)
+        self.snap_button = tk.Button(
+            master=frame, text='Snap', bg='gray1', fg='white', font=60,
+            command=lambda: self.root.after_idle(self.snap))
+        self.snap_button.bind(
+            "<Button-1>", lambda x: self.snap_button.focus_set())
+        self.snap_button.pack(side=tk.TOP)
 
         frame = tk.Frame(self.root)
         frame.pack(side=tk.TOP)
@@ -184,7 +211,12 @@ class GUI:
             self.config.write(configfile)
         return None
 
-        
+    def calibrate(self):
+        return None
+
+    def snap(self):
+        return None
+
 class Display_Settings_Window:
     def __init__(self, parent):
         self.parent = parent

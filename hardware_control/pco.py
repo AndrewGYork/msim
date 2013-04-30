@@ -476,19 +476,21 @@ class Edge:
             first_frame = 0
             assert bytes_per_pixel.value == 2
             out = numpy.ones(
-                (num_images, self.wYRes.value, self.wXRes.value),
+                (num_images - preframes, self.wYRes.value, self.wXRes.value),
                 dtype=numpy.uint16)
         else:
             try:
                 assert out.shape[1:] == (
                     self.wYRes.value, self.wXRes.value)
-                assert out.shape[0] >= num_images
+                assert out.shape[0] >= (num_images - preframes)
             except AssertionError:
                 print out.shape
-                print (num_images, self.wYRes.value, self.wXRes.value)
+                print (num_images - preframes,
+                       self.wYRes.value,
+                       self.wXRes.value)
                 raise UserWarning(
                     "Input argument 'out' must have dimensions:\n" +
-                    "(>=num_images, y-resolution, x-resolution)")
+                    "(>=num_images - preframes, y-resolution, x-resolution)")
             except AttributeError:
                 raise UserWarning("Input argument 'out' must be a numpy array.")
 

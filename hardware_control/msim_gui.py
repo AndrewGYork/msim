@@ -77,7 +77,8 @@ class GUI:
             self.lake_info[c] = {}
             self.lake_info[c]['button'] = tk.Button(
                 subframe, text='Calibrate',bg='red', fg='white',
-                command=lambda: self.root.after_idle(self.calibrate))
+                command=lambda: self.root.after_idle(
+                    lambda: self.calibrate(c)))
             self.lake_info[c]['button'].pack(side=tk.LEFT)
 
 ##        self.exposure_time_milliseconds = 4.5
@@ -215,19 +216,15 @@ class GUI:
         """Try to get path and age of the lake calibration data"""
         now = datetime.datetime.now()
         for c in self.lasers:
-            print c
             try:
                 self.lake_info[c]['path'] = self.config.get(
                     c + ' calibration', 'path')
-                print self.lake_info[c]['path']
                 self.lake_info[c]['date'] = self.config.get(
                     c + ' calibration', 'date').split()
-                print self.lake_info[c]['date']
                 assert os.path.exists(self.lake_info[c]['path'])
             except (ConfigParser.NoSectionError,
                     ConfigParser.NoOptionError,
                     AssertionError) as e:
-                print e
                 continue
             try:
                 lake_date = datetime.datetime(
@@ -247,7 +244,8 @@ class GUI:
             self.config.write(configfile)
         return None
 
-    def calibrate(self):
+    def calibrate(self, color):
+        calibration_window = Calibration_Window(self, color)
         return None
 
     def snap(self):
@@ -353,6 +351,75 @@ class Filter_Window:
             a.pack(side=tk.LEFT)
         return None
 
+class Calibration_Window:
+    def __init__(self, parent, color):
+        self.parent = parent
+        self.color = color
+        self.root = tk.Toplevel(parent.root)
+        self.root.wm_title("Calibration")
+        self.root.bind("<Escape>", lambda x: self.cancel())
+        self.root.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.root.lift()
+        self.root.focus_force()
+        self.parent.root.withdraw()
+
+        self.frame = tk.Frame(self.root)
+        self.frame.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(self.frame, text="Calibration mode.\n\n" +
+                     "Put a fluorescent lake slide on the microscope.\n" +
+                     "Click 'Ok' when the slide is in place.\n" +
+                     "\nWARNING!\n\n" +
+                     "Lasers will turn on when you press 'Ok'.")
+        a.pack(side=tk.TOP)
+        frame = tk.Frame(self.frame)
+        frame.pack(side=tk.TOP)
+        a = tk.Button(frame, text='Ok', command=self.alignment_mode)
+        a.focus_set()
+        a.bind('<Return>', lambda x: self.alignment_mode())
+        a.pack(side=tk.LEFT)
+        a = tk.Button(frame, text='Cancel', command=self.cancel)
+        a.bind('<Return>', lambda x: self.cancel())
+        a.pack(side=tk.LEFT)
+        
+        return None
+
+    def alignment_mode(self):
+        self.frame.pack_forget()
+        self.frame = tk.Frame(self.root)
+        self.frame.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(self.frame, text="Calibration mode.\n\n" +
+                     "Adjust the focus using the objective knob.\n" +
+                     "You should see an array of spots.\n" +
+                     "Click 'Ok' when the spots are visible.\n")
+        a.pack(side=tk.TOP)
+        frame = tk.Frame(self.frame)
+        frame.pack(side=tk.TOP)
+        a = tk.Button(frame, text='Ok', command=self.acquire_calibration)
+        a.focus_set()
+        a.bind('<Return>', lambda x: self.alignment_mode())
+        a.pack(side=tk.LEFT)
+        a = tk.Button(frame, text='Cancel', command=self.cancel)
+        a.bind('<Return>', lambda x: self.cancel())
+        a.pack(side=tk.LEFT)
+        return None
+
+    def acquire_calibration(self):
+        self.frame.pack_forget()
+        self.frame = tk.Frame(self.root)
+        self.frame.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(self.frame, text="Calibration mode.\n\n" +
+                     "Acquiring calibration...")
+        a.pack(side=tk.TOP)
+        a = tk.Button(self.frame, text='Cancel', command=self.cancel)
+        a.bind('<Return>', lambda x: self.cancel())
+        a.pack(side=tk.TOP)
+        return None
+    
+    def cancel(self):
+        self.root.withdraw()
+        self.parent.root.deiconify()
+        self.root.destroy()
+        return None
     
 class Scale_Spinbox:
     def __init__(self, master, from_, to, increment=1, initial_value=None):

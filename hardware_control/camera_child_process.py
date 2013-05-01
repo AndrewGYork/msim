@@ -30,7 +30,7 @@ def camera_child_process(
     """
     import pco
     camera = pco.Edge()
-    camera.apply_settings()
+    camera.apply_settings(trigger='external trigger/software exposure control')
     camera.get_shutter_mode()
     camera.get_settings(verbose=False)
     camera.arm(num_buffers=3)

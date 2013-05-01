@@ -23,7 +23,6 @@ acquisition, display, and saving at their own paces, without enforced
 synchronization.
 """
 
-
 log = mp.get_logger()
 info = log.info
 debug = log.debug
@@ -187,7 +186,7 @@ if camera_child_process is None:
         commands,
         ):
         data = [np.zeros(buffer_shape, dtype=np.uint16)
-                for i in range(100)]
+                for i in data_buffers]
         for i, d in enumerate(data):
             d.fill(int((2**16 - 1) * (i + 1.0) / len(data)))
         data_idx = -1

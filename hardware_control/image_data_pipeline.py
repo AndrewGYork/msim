@@ -192,6 +192,10 @@ if camera_child_process is None:
             d.fill(int((2**16 - 1) * (i + 1.0) / len(data)))
         data_idx = -1
         while True:
+            if commands.poll():
+                cmd, args = commands.recv()
+                commands.send(None)
+                continue
             try:
                 process_me = input_queue.get_nowait()
             except Queue.Empty:

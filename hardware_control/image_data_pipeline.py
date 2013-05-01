@@ -449,6 +449,21 @@ class Display:
                 height=int(self.image.height * self.image_scale),
                 width=int(self.image.width * self.image_scale))
 
+        """
+        We don't want 'escape' or 'quit' to quit the pyglet
+        application, just withdraw it. The parent application should
+        control when pyglet quits.
+        """
+        @self.window.event
+        def on_key_press(symbol, modifiers):
+            self.window.set_visible(False)
+            if symbol == pyglet.window.key.ESCAPE:
+                return pyglet.event.EVENT_HANDLED
+        @self.window.event
+        def on_close():
+            self.window.set_visible(False)
+            return pyglet.event.EVENT_HANDLED
+
         update_interval_seconds = 0.025
         pyglet.clock.schedule_interval(self.update, update_interval_seconds)
         return None
@@ -541,6 +556,9 @@ class Display:
                 pyglet.gl.GL_TEXTURE_2D,
                 pyglet.gl.GL_TEXTURE_MAG_FILTER,
                 pyglet.gl.GL_NEAREST)
+        if hasattr(self, 'window'):
+            if not self.window.visible:
+                self.window.set_visible(True)
         return None
 
     def set_intensity_scaling(self, scaling, display_min, display_max):

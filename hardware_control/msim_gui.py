@@ -2,6 +2,7 @@ import os
 ##import time
 import logging
 import ConfigParser
+import datetime
 import multiprocessing as mp
 import Tkinter as tk
 import tkMessageBox
@@ -22,7 +23,10 @@ class GUI:
             num_buffers=5,
             buffer_shape=(224, 480, 480))
         self.root = tk.Tk()
-        self.root.iconbitmap(default='microscope.ico')
+        try:
+            self.root.iconbitmap(default='microscope.ico')
+        except tk.TclError:
+            print "WARNING: Icon file 'microscope.ico' not found."
         self.root.report_callback_exception = self.report_callback_exception
         self.root.title("MSIM controls")
 
@@ -185,6 +189,7 @@ class GUI:
         self.config = ConfigParser.RawConfigParser()
         self.config.read(os.path.join(os.getcwd(), 'config.ini'))
         while True:
+            """Try to get the path to the ImageJ executable"""
             try:
                 imagej_path = self.config.get('ImageJ', 'path')
                 assert os.path.basename(imagej_path).lower() == 'imagej.exe'
@@ -207,6 +212,37 @@ class GUI:
                     self.config.remove_option('ImageJ', 'path')
                 else:
                     break
+        """Try to get path and age of the lake calibration data"""
+        now = datetime.datetime.now()
+        for c in self.lasers:
+            print c
+            try:
+                self.lake_info[c]['path'] = self.config.get(
+                    c + ' calibration', 'path')
+                print self.lake_info[c]['path']
+                self.lake_info[c]['date'] = self.config.get(
+                    c + ' calibration', 'date').split()
+                print self.lake_info[c]['date']
+                assert os.path.exists(self.lake_info[c]['path'])
+            except (ConfigParser.NoSectionError,
+                    ConfigParser.NoOptionError,
+                    AssertionError) as e:
+                print e
+                continue
+            try:
+                lake_date = datetime.datetime(
+                    *[int(i) for i in self.lake_info[c]['date']])
+                print lake_date
+            except TypeError:
+                continue
+            if abs((lake_date - now).total_seconds()) > 85400:
+                print "Yellow"
+                """The lake data exists, but is more than one day old"""
+                self.lake_info[c]['button'].config(bg='yellow', fg='black')
+            else:
+                print "Gray"
+                self.lake_info[c]['button'].config(bg='gray', fg='black')
+                
         with open('config.ini', 'w') as configfile:
             self.config.write(configfile)
         return None

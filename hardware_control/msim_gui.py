@@ -9,6 +9,7 @@ import tkMessageBox
 import tkFileDialog
 ##import numpy as np
 from image_data_pipeline import Image_Data_Pipeline
+from dmd import ALP
 
 ##if sys.platform == 'win32':
 ##    clock = time.clock
@@ -22,6 +23,7 @@ class GUI:
         self.data_pipeline = Image_Data_Pipeline(
             num_buffers=5,
             buffer_shape=(224, 480, 480))
+        self.dmd = ALP()
         self.root = tk.Tk()
         try:
             self.root.iconbitmap(default='microscope.ico')
@@ -401,9 +403,31 @@ class Calibration_Window:
         a = tk.Button(frame, text='Cancel', command=self.cancel)
         a.bind('<Return>', lambda x: self.cancel())
         a.pack(side=tk.LEFT)
+        self.parent.data_pipeline.camera.commands.send((
+            'frames_per_acquisition', {'frames_per_acquisition': 1}))
+        assert self.parent.data_pipeline.camera.commands.recv() == 1
+        self.parent.dmd.apply_settings(
+            illuminate_time=2200,
+            illumination_filename='alignment_pattern.raw')
+        self.aligning = True
+        self.play_alignment_pattern()
+        return None
+
+    def play_alignment_pattern(self):
+        while len(self.parent.data_pipeline.idle_buffers) < 1:
+            self.parent.data_pipeline.collect_data_buffers()
+        self.parent.data_pipeline.load_data_buffers(1)
+        self.parent.dmd.display_pattern()
+        if self.aligning:
+            self.root.after(50, self.play_alignment_pattern)
         return None
 
     def acquire_calibration(self):
+        self.aligning = False
+        self.parent.data_pipeline.camera.commands.send((
+            'frames_per_acquisition',
+            {'frames_per_acquisition': 'buffer_size'}))
+        assert self.parent.data_pipeline.camera.commands.recv() == 'buffer_size'
         self.frame.pack_forget()
         self.frame = tk.Frame(self.root)
         self.frame.pack(side=tk.TOP, fill=tk.BOTH)

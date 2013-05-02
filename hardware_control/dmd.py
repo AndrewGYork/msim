@@ -127,14 +127,16 @@ class ALP:
 ##            illumination_filename='widefield_pattern.raw',
 ##            illuminate_time=illuminate_time, picture_time=picture_time)
 
-    def display_pattern(self):
+    def display_pattern(self, verbose=True):
         """Start sequence"""
         _check(DMD_api.AlpProjStart(self.id, self.seq_id))
 
         """Wait for the sequence to finish displaying"""
-        print "Displaying DMD pattern sequence..."
+        if verbose:
+            print "Displaying DMD pattern sequence..."
         DMD_api.AlpProjWait(self.id)
-        print " Done."
+        if verbose:
+            print " Done."
 
     def close(self):
         print "Freeing DMD device %i..."%(self.id.value)

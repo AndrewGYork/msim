@@ -129,7 +129,9 @@ class Image_Data_Pipeline:
         should make a new Image_Data_Pipeline.
         """
         assert len(buffer_shape) == 3
-        if numpy.prod(buffer_shape) > self.buffer_size:
+        for s in buffer_shape:
+            assert s > 0
+        if np.prod(buffer_shape) > self.buffer_size:
             raise UserWarning("If you want a buffer larger than the original" +
                               " buffer size, close this Image_Data_Pipeline" +
                               " and make a new one.")
@@ -142,10 +144,12 @@ class Image_Data_Pipeline:
                   self.file_saving,
                   self.projection,
                   self.display):
-            p.commands.send('set_buffer_shape', {'shape': buffer_shape})
+            p.commands.send(('set_buffer_shape', {'shape': buffer_shape}))
+            print p.child.name
+            print "Response:"
             while True:
                 if p.commands.poll():
-                    p.commands.recv()
+                    print p.commands.recv()
                     break
         return None
     
@@ -391,14 +395,6 @@ def projection_child_process(
     buffer_size = np.prod(buffer_shape)
     display_buffer_size = np.prod(buffer_shape[1:])
     while True:
-        if commands.poll():
-            cmd, args = commands.recv()
-            if cmd == 'set_buffer_shape':
-                buffer_shape = args['shape']
-                buffer_size = np.prod(buffer_shape)
-                display_buffer_size = np.prod(buffer_shape[1:])
-                commands.send(buffer_shape)
-            continue
         try: #Get a pending display buffer
             fill_me = display_buffer_input_queue.get_nowait()
         except Queue.Empty:
@@ -409,6 +405,15 @@ def projection_child_process(
         else: 
             info("Display buffer %i received"%(fill_me))
             while True:
+                if commands.poll():
+                    info("Command received")
+                    cmd, args = commands.recv()
+                    if cmd == 'set_buffer_shape':
+                        buffer_shape = args['shape']
+                        buffer_size = np.prod(buffer_shape)
+                        display_buffer_size = np.prod(buffer_shape[1:])
+                        commands.send(buffer_shape)
+                    continue
                 try: #Now get a pending accumulation buffer
                     project_me = accumulation_buffer_input_queue.get_nowait()
                 except Queue.Empty: #Nothing pending. Keep trying.
@@ -569,8 +574,8 @@ class Display:
             self.display_buffer_size = np.prod(self.buffer_shape[1:])
             if hasattr(self, 'display_data_16'):
                 self.display_data_16 = self.display_data_16[
-                    :buffer_shape[1],
-                    :buffer_shape[2]]
+                    :self.buffer_shape[1],
+                    :self.buffer_shape[2]]
             if hasattr(self, 'display_data_8'):
                 self.display_data_8 = np.empty(self.buffer_shape[1:],
                                                dtype=np.uint8)
@@ -786,9 +791,12 @@ if __name__ == '__main__':
     idp = Image_Data_Pipeline()
     while True:
         try:
-            idp.load_data_buffers(len(idp.idle_data_buffers))
             idp.collect_data_buffers()
-            time.sleep(0.1)
+            idp.load_data_buffers(len(idp.idle_data_buffers))
+            raw_input('Press Enter to continue...')
+            idp.set_buffer_shape((idp.buffer_shape[0],
+                                  idp.buffer_shape[1],
+                                  idp.buffer_shape[2] - 10))
         except KeyboardInterrupt:
             break
     idp.close()

@@ -145,11 +145,9 @@ class Image_Data_Pipeline:
                   self.projection,
                   self.display):
             p.commands.send(('set_buffer_shape', {'shape': buffer_shape}))
-            print p.child.name
-            print "Response:"
             while True:
                 if p.commands.poll():
-                    print p.commands.recv()
+                    p.commands.recv()
                     break
         return None
     

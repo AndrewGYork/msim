@@ -1,7 +1,8 @@
 import serial, time
 
 class Laser_Shutters:
-    def __init__(self, colors='all'):
+    def __init__(self, colors='all', pause_after_open=0):
+        self.delay = pause_after_open
         self.ports = {}
         self.states = {}
         if colors == 'all':
@@ -60,6 +61,7 @@ class Laser_Shutters:
             pass
         else:
             self.toggle(color, verbose=False)
+            time.sleep(self.delay)
 
     def shut(self, color='488'):
         print "Shutting shutter:", color

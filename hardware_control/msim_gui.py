@@ -1,3 +1,4 @@
+import sys
 import os
 ##import time
 import logging
@@ -10,6 +11,8 @@ import tkFileDialog
 ##import numpy as np
 from image_data_pipeline import Image_Data_Pipeline
 from dmd import ALP
+from shutters import Laser_Shutters
+from wheel import Filter_Wheel
 
 ##if sys.platform == 'win32':
 ##    clock = time.clock
@@ -19,7 +22,7 @@ from dmd import ALP
 class GUI:
     def __init__(self):
         logger = mp.log_to_stderr()
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logging.WARNING)
         self.data_pipeline = Image_Data_Pipeline(
             num_buffers=5,
             buffer_shape=(224, 480, 480))
@@ -28,6 +31,12 @@ class GUI:
         self.dmd = ALP()
         self.dmd_settings = {}
         self.dmd_num_frames = 0
+        self.lasers = ['561', '488']
+        self.shutters = Laser_Shutters(colors=self.lasers,
+                                       pause_after_open=0.2)
+        self.shutter_timeout_seconds = 0
+        self.filters = Filter_Wheel(initial_position='f3',
+                                    wheel_delay=1.8)
         self.root = tk.Tk()
         try:
             self.root.iconbitmap(default='microscope.ico')
@@ -50,7 +59,6 @@ class GUI:
         self.menubar.add_cascade(label="Settings", menu=self.settingsmenu)
         self.root.config(menu=self.menubar)
 
-        self.lasers = ['561', '488']
         self.emission_filters = {}
         for c in self.lasers:
             self.emission_filters[c] = tk.StringVar()
@@ -83,8 +91,8 @@ class GUI:
             self.lake_info[c] = {}
             self.lake_info[c]['button'] = tk.Button(
                 subframe, text='Calibrate',bg='red', fg='white',
-                command=lambda: self.root.after_idle(
-                    lambda: self.calibrate(c)))
+                command=lambda color=c: self.root.after_idle(
+                    lambda: self.calibrate(color)))
             self.lake_info[c]['button'].pack(side=tk.LEFT)
 
 ##        self.exposure_time_milliseconds = 4.5
@@ -104,16 +112,16 @@ class GUI:
 ##                self.num_galvo_sweeps.get(), self.galvo_sweep_milliseconds,
 ##                self.num_galvo_sweeps.get()* self.galvo_sweep_milliseconds))
 ##        a.pack(side=Tk.LEFT)
-        self.snap_button = tk.Button(
-            master=frame, text='Snap', bg='gray1', fg='white', font=60,
-            command=lambda: self.root.after_idle(self.snap))
-        self.snap_button.bind(
-            "<Button-1>", lambda x: self.snap_button.focus_set())
-        self.snap_button.pack(side=tk.TOP)
+            
+##        self.snap_button = tk.Button(
+##            master=frame, text='Snap', bg='gray1', fg='white', font=60,
+##            command=lambda: self.root.after_idle(self.snap))
+##        self.snap_button.bind(
+##            "<Button-1>", lambda x: self.snap_button.focus_set())
+##        self.snap_button.pack(side=tk.TOP)
 
-        frame = tk.Frame(self.root)
-        frame.pack(side=tk.TOP)
-        
+##        frame = tk.Frame(self.root)
+##        frame.pack(side=tk.TOP)  
 ##        a.pack(side=tk.LEFT)
 ##        a = tk.Button(
 ##            frame, text="Load buffers",
@@ -129,6 +137,7 @@ class GUI:
         self.data_pipeline.set_display_intensity_scaling(
             'median_filter_autoscale', display_min=0, display_max=0)
         self.root.after(50, self.load_config)
+        self.root.after(50, self.close_shutters)
         self.root.mainloop()
         self.data_pipeline.close()
         self.dmd.close()
@@ -154,10 +163,21 @@ class GUI:
 ##            num_buffers, file_saving_info=file_info)
 ##        return None
 
-    def snap(self, dmd_settings, camera_settings, file_saving_info=None):
+    def snap(self, color, dmd_settings, camera_settings, file_saving_info=None):
         """
         First, we need to check if the DMD settings need to update.
         """
+        self.filters.move('f' + self.emission_filters[color].get().split()[-1])
+        print "Snapping", color
+        if 'illuminate_time' in dmd_settings:
+            dmd_settings['illuminate_time'] = int(
+                dmd_settings['illuminate_time'] *
+                0.01 * self.laser_power[color].get())
+            print dmd_settings['illuminate_time']
+        else:
+            raise UserWarning("DMD settings didn't contain 'illuminate_time'")
+        if 'picture_time' not in dmd_settings:
+            dmd_settings['picture_time'] = 4500
         for k in (dmd_settings.keys() + self.dmd_settings.keys()):
             try:
                 assert dmd_settings[k] == self.dmd_settings[k]
@@ -222,9 +242,33 @@ class GUI:
         """
         while len(self.data_pipeline.idle_data_buffers) < 1:
             self.data_pipeline.collect_data_buffers()
+        for c in self.lasers:
+            if c == color:
+                pass
+            else:
+                self.shutters.shut(c, verbose=False)
+        expected_shutter_duration = (
+            0.001 * self.dmd_settings['picture_time'] * self.num_dmd_frames)
+        self.shutter_timeout_seconds = max(self.shutter_timeout_seconds,
+                                           expected_shutter_duration + 0.2)
+        self.shutters.open(color, verbose=False)
         self.data_pipeline.load_data_buffers(
             1, file_saving_info=file_saving_info)
-        self.dmd.display_pattern()
+        self.dmd.display_pattern(verbose=False)
+        self.data_pipeline.camera.commands.send(('get_status', {}))
+        while True:
+            if self.data_pipeline.camera.commands.poll():
+                camera_status = self.data_pipeline.camera.commands.recv()
+                break
+        return None
+
+    def close_shutters(self):
+        if self.shutter_timeout_seconds > 0:
+            self.shutter_timeout_seconds -= 0.3
+            if self.shutter_timeout_seconds <= 0:
+                for c in self.lasers:
+                    self.shutters.shut(c)
+        self.root.after(50, self.close_shutters)
         return None
 
     def open_display_settings_window(self):
@@ -325,6 +369,7 @@ class GUI:
         return None
 
     def calibrate(self, color):
+        print color
         calibration_window = Calibration_Window(self, color)
         return None
 
@@ -440,6 +485,19 @@ class Calibration_Window:
         self.root.focus_force()
         self.parent.root.withdraw()
 
+        self.menubar = tk.Menu(self.root)
+        self.filemenu = tk.Menu(self.menubar, tearoff=0)
+        self.filemenu.add_command(
+            label="Exit", command=self.parent.root.destroy)
+        self.menubar.add_cascade(label="File", menu=self.filemenu)
+        self.settingsmenu = tk.Menu(self.menubar, tearoff=0)
+        self.settingsmenu.add_command(
+            label="Display", command=self.parent.open_display_settings_window)
+        self.settingsmenu.add_command(
+            label="Emission filters", command=self.parent.open_filter_window)
+        self.menubar.add_cascade(label="Settings", menu=self.settingsmenu)
+        self.root.config(menu=self.menubar)
+
         self.frame = tk.Frame(self.root)
         self.frame.pack(side=tk.TOP, fill=tk.BOTH)
         a = tk.Label(self.frame, text="Calibration mode.\n\n" +
@@ -450,16 +508,17 @@ class Calibration_Window:
         a.pack(side=tk.TOP)
         frame = tk.Frame(self.frame)
         frame.pack(side=tk.TOP)
-        a = tk.Button(frame, text='Ok', command=self.alignment_mode)
+        a = tk.Button(frame, text='Ok',
+                      command=lambda: self.alignment_mode(color))
         a.focus_set()
-        a.bind('<Return>', lambda x: self.alignment_mode())
+        a.bind('<Return>', lambda x: self.alignment_mode(color))
         a.pack(side=tk.LEFT)
         a = tk.Button(frame, text='Cancel', command=self.cancel)
         a.bind('<Return>', lambda x: self.cancel())
         a.pack(side=tk.LEFT)
         return None
 
-    def alignment_mode(self):
+    def alignment_mode(self, color):
         self.frame.pack_forget()
         self.frame = tk.Frame(self.root)
         self.frame.pack(side=tk.TOP, fill=tk.BOTH)
@@ -477,11 +536,23 @@ class Calibration_Window:
         a = tk.Button(frame, text='Cancel', command=self.cancel)
         a.bind('<Return>', lambda x: self.cancel())
         a.pack(side=tk.LEFT)
+        subframe = tk.Frame(frame)
+        subframe.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        a = tk.Label(subframe, text='Laser power:\n'+color+' nm (%)')
+        a.pack(side=tk.LEFT)
+        self.laser_power = Scale_Spinbox(
+            subframe, from_=0.1, to=100, increment=0.1, initial_value=100)
+        self.laser_power.spinbox.config(width=5)
+        self.laser_power.bind(
+            "<<update>>", lambda x, color=color: self.root.after_idle(
+                lambda: self.parent.laser_power[color].set(
+                    self.laser_power.get())))
+        self.laser_power.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
         self.aligning = True
-        self.play_alignment_pattern()
+        self.play_alignment_pattern(color)
         return None
     
-    def play_alignment_pattern(self):
+    def play_alignment_pattern(self, color):
         dmd_settings = {
             'illuminate_time': 2200,
             'illumination_filename': 'alignment_pattern.raw',
@@ -490,9 +561,9 @@ class Calibration_Window:
             'exposure_time_microseconds': 2200,
             'trigger': 'external trigger/software exposure control',
             }
-        self.parent.snap(dmd_settings, camera_settings)
+        self.parent.snap(color, dmd_settings, camera_settings)
         if self.aligning:
-            self.root.after(50, self.play_alignment_pattern)
+            self.root.after(50, lambda: self.play_alignment_pattern(color))
         return None
 
     def acquire_calibration(self):

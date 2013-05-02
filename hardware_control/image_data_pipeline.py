@@ -44,16 +44,16 @@ class Image_Data_Pipeline:
         self.buffer_shape = buffer_shape
         self.num_data_buffers = num_buffers
         
-        pix_per_buf = np.prod(buffer_shape)
-        self.data_buffers = [mp.Array(ctypes.c_uint16, pix_per_buf)
+        self.buffer_size = np.prod(buffer_shape)
+        self.data_buffers = [mp.Array(ctypes.c_uint16, self.buffer_size)
                              for b in range(self.num_data_buffers)]
-        self.idle_buffers = range(self.num_data_buffers)
+        self.idle_data_buffers = range(self.num_data_buffers)
         
-        self.accumulation_buffers = [mp.Array(ctypes.c_uint16, pix_per_buf)
+        self.accumulation_buffers = [mp.Array(ctypes.c_uint16, self.buffer_size)
                                      for b in range(2)]
 
-        pix_per_display_buf = np.prod(buffer_shape[1:])
-        self.display_buffers = [mp.Array(ctypes.c_uint16, pix_per_display_buf)
+        display_buffer_size = np.prod(buffer_shape[1:])
+        self.display_buffers = [mp.Array(ctypes.c_uint16, display_buffer_size)
                                 for b in range(2)]
 
         """
@@ -104,7 +104,7 @@ class Image_Data_Pipeline:
         for i in range(N):
             for tries in range(10):
                 try:
-                    self.camera.input_queue.put(self.idle_buffers.pop(0))
+                    self.camera.input_queue.put(self.idle_data_buffers.pop(0))
                     break
                 except IndexError:
                     time.sleep(timeout * 0.1)
@@ -114,12 +114,12 @@ class Image_Data_Pipeline:
     def collect_data_buffers(self):
         while True:
             try:
-                self.idle_buffers.append(
+                self.idle_data_buffers.append(
                     self.file_saving.output_queue.get_nowait())
             except Queue.Empty:
                 break
             else:
-                info("Buffer %i idle"%(self.idle_buffers[-1]))
+                info("Buffer %i idle"%(self.idle_data_buffers[-1]))
         return None
 
     def set_display_intensity_scaling(
@@ -705,7 +705,7 @@ if __name__ == '__main__':
     idp = Image_Data_Pipeline()
     while True:
         try:
-            idp.load_data_buffers(len(idp.idle_buffers))
+            idp.load_data_buffers(len(idp.idle_data_buffers))
             idp.collect_data_buffers()
             time.sleep(0.1)
         except KeyboardInterrupt:

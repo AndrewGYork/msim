@@ -28,6 +28,7 @@ def camera_child_process(
     """
     This version's suitable for the pco.edge camera.
     """
+    buffer_size = np.prod(buffer_shape)
     import pco
     camera = pco.Edge()
     camera.apply_settings(trigger='external trigger/software exposure control')
@@ -36,19 +37,26 @@ def camera_child_process(
     camera.arm(num_buffers=3)
     camera._prepare_to_record_to_memory()
     preframes = 0
-    frames_per_acquisition = 'buffer_size'
+    status = 'Normal'
     while True:
         if commands.poll():
             cmd, args = commands.recv()
-            if cmd == 'apply_settings':
+            if cmd == 'set_buffer_shape':
+                buffer_shape = args['shape']
+                buffer_size = np.prod(buffer_shape)
+                commands.send(buffer_shape)
+            elif cmd == 'apply_settings':
                 settings = camera.apply_settings(**args)
                 camera.arm()
+                camera._prepare_to_record_to_memory()
                 commands.send(settings)
             elif cmd == 'get_settings':
                 commands.send(camera.get_settings(**args))
-            elif cmd == 'frames_per_acquisition':
-                frames_per_acquisition = args['frames_per_acquisition']
-                commands.send(frames_per_acquisition)
+            elif cmd == 'get_status':
+                commands.send(status)
+            elif cmd == 'reset_status':
+                status = 'Normal'
+                commands.send(None)
             continue
         try:
             process_me = input_queue.get_nowait()
@@ -61,17 +69,21 @@ def camera_child_process(
             """Fill the buffer with something"""
             info("start buffer %i"%(process_me))
             with data_buffers[process_me].get_lock():
+                info("Got lock")
                 a = np.frombuffer(data_buffers[process_me].get_obj(),
-                                  dtype=np.uint16).reshape(buffer_shape)
-                if frames_per_acquisition is 'buffer_size':
-                    num_images = a.shape[0] + preframes
-                else:
-                    num_images = frames_per_acquisition + preframes
-                    a[frames_per_acquisition:, :, :].fill(0)
-                camera.record_to_memory(
-                    num_images=num_images,
-                    preframes=preframes,
-                    out=a)
+                                  dtype=np.uint16)[:buffer_size
+                                                   ].reshape(buffer_shape)
+                info("Frombuffer")
+                try:
+                    camera.record_to_memory(
+                        num_images=a.shape[0] + preframes,
+                        preframes=preframes,
+                        out=a)
+                    info("Record to memory")
+                except pco.TimeoutError:
+                    status = 'TimeoutError'
+                except pco.DMAError:
+                    status = 'DMAError'
             info("end buffer %i"%(process_me))
             output_queue.put(process_me)
     camera.close()

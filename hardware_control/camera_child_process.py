@@ -69,17 +69,14 @@ def camera_child_process(
             """Fill the buffer with something"""
             info("start buffer %i"%(process_me))
             with data_buffers[process_me].get_lock():
-                info("Got lock")
                 a = np.frombuffer(data_buffers[process_me].get_obj(),
                                   dtype=np.uint16)[:buffer_size
                                                    ].reshape(buffer_shape)
-                info("Frombuffer")
                 try:
                     camera.record_to_memory(
                         num_images=a.shape[0] + preframes,
                         preframes=preframes,
                         out=a)
-                    info("Record to memory")
                 except pco.TimeoutError:
                     status = 'TimeoutError'
                 except pco.DMAError:

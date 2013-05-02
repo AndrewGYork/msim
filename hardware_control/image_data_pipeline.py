@@ -42,9 +42,9 @@ class Image_Data_Pipeline:
         8-bit buffers for display data.
         """
         self.buffer_shape = buffer_shape
+        self.buffer_size = np.prod(buffer_shape)
         self.num_data_buffers = num_buffers
         
-        self.buffer_size = np.prod(buffer_shape)
         self.data_buffers = [mp.Array(ctypes.c_uint16, self.buffer_size)
                              for b in range(self.num_data_buffers)]
         self.idle_data_buffers = range(self.num_data_buffers)
@@ -121,7 +121,34 @@ class Image_Data_Pipeline:
             else:
                 info("Buffer %i idle"%(self.idle_data_buffers[-1]))
         return None
-
+    
+    def set_buffer_shape(self, buffer_shape):
+        """
+        You don't have to use the whole buffer! If you want to make a
+        buffer with more pixels than the original one, though, you
+        should make a new Image_Data_Pipeline.
+        """
+        assert len(buffer_shape) == 3
+        if numpy.prod(buffer_shape) > self.buffer_size:
+            raise UserWarning("If you want a buffer larger than the original" +
+                              " buffer size, close this Image_Data_Pipeline" +
+                              " and make a new one.")
+        self.buffer_shape = buffer_shape
+        while len(self.idle_data_buffers) < len(self.data_buffers):
+            self.collect_data_buffers()
+            time.sleep(0.01)
+        for p in (self.camera,
+                  self.accumulation,
+                  self.file_saving,
+                  self.projection,
+                  self.display):
+            p.commands.send('set_buffer_shape', {'shape': buffer_shape})
+            while True:
+                if p.commands.poll():
+                    p.commands.recv()
+                    break
+        return None
+    
     def set_display_intensity_scaling(
         self, scaling, display_min=None, display_max=None):
         args = locals()
@@ -185,6 +212,7 @@ if camera_child_process is None:
         output_queue,
         commands,
         ):
+        buffer_size = np.prod(buffer_shape)
         data = [np.zeros(buffer_shape, dtype=np.uint16)
                 for i in data_buffers]
         for i, d in enumerate(data):
@@ -194,6 +222,9 @@ if camera_child_process is None:
             if commands.poll():
                 cmd, args = commands.recv()
                 commands.send(None)
+                if cmd == 'set_buffer_shape':
+                    buffer_shape = args['shape']
+                    buffer_size = np.prod(buffer_shape)
                 continue
             try:
                 process_me = input_queue.get_nowait()
@@ -207,11 +238,14 @@ if camera_child_process is None:
                 info("start buffer %i"%(process_me))
                 with data_buffers[process_me].get_lock():
                     a = np.frombuffer(data_buffers[process_me].get_obj(),
-                                      dtype=np.uint16).reshape(buffer_shape)
+                                      dtype=np.uint16)[:buffer_size
+                                                       ].reshape(buffer_shape)
     ##                a.fill(1)
                     data_idx += 1
                     data_idx = data_idx %len(data)
-                    a[:] = data[data_idx]
+                    a[:] = data[data_idx][:buffer_shape[0],
+                                          :buffer_shape[1],
+                                          :buffer_shape[2]]
     ##            time.sleep(0.013)
                 info("end buffer %i"%(process_me))
                 output_queue.put(process_me)
@@ -260,11 +294,19 @@ def accumulation_child_process(
     accumulation_buffer_input_queue,
     accumulation_buffer_output_queue,
     ):
+    buffer_size = np.prod(buffer_shape)
     current_accumulation_buffer = 0
     num_accumulated = 0
     accumulation_buffer_input_queue.put(1)
     accumulation_buffer_occupied = False
     while True:
+        if commands.poll():
+            cmd, args = commands.recv()
+            if cmd == 'set_buffer_shape':
+                buffer_shape = args['shape']
+                buffer_size = np.prod(buffer_shape)
+                commands.send(buffer_shape)
+            continue
         if accumulation_buffer_occupied:
             try: #Check for a pending accumulation buffer
                 switch_to_me = accumulation_buffer_input_queue.get_nowait()
@@ -291,12 +333,12 @@ def accumulation_child_process(
             with data_buffers[process_me].get_lock():
                 data = np.frombuffer(
                     data_buffers[process_me].get_obj(),
-                    dtype=np.uint16).reshape(buffer_shape)
+                    dtype=np.uint16)[:buffer_size].reshape(buffer_shape)
                 with accumulation_buffers[
                     current_accumulation_buffer].get_lock():
                     a_b = np.frombuffer(accumulation_buffers[
                         current_accumulation_buffer].get_obj(),
-                        dtype=np.uint16).reshape(buffer_shape)
+                        dtype=np.uint16)[:buffer_size].reshape(buffer_shape)
                     if accumulation_buffer_occupied: #Accumulate
                         np.maximum(data, a_b, out=a_b)
                     else: #First accumulation; copy.
@@ -346,7 +388,17 @@ def projection_child_process(
     accumulation_buffer_input_queue,
     accumulation_buffer_output_queue,
     ):
+    buffer_size = np.prod(buffer_shape)
+    display_buffer_size = np.prod(buffer_shape[1:])
     while True:
+        if commands.poll():
+            cmd, args = commands.recv()
+            if cmd == 'set_buffer_shape':
+                buffer_shape = args['shape']
+                buffer_size = np.prod(buffer_shape)
+                display_buffer_size = np.prod(buffer_shape[1:])
+                commands.send(buffer_shape)
+            continue
         try: #Get a pending display buffer
             fill_me = display_buffer_input_queue.get_nowait()
         except Queue.Empty:
@@ -370,11 +422,12 @@ def projection_child_process(
                     with accumulation_buffers[project_me].get_lock():
                         acc = np.frombuffer(
                             accumulation_buffers[project_me].get_obj(),
-                            dtype=np.uint16).reshape(buffer_shape)
+                            dtype=np.uint16)[:buffer_size].reshape(buffer_shape)
                         with display_buffers[fill_me].get_lock():
                             disp = np.frombuffer(
                                 display_buffers[fill_me].get_obj(),
-                                dtype=np.uint16).reshape(buffer_shape[1:])
+                                dtype=np.uint16)[:display_buffer_size
+                                                 ].reshape(buffer_shape[1:])
                             np.amax(acc, axis=0, out=disp) #Project
                     info("end accumulation buffer %i"%(project_me))
                     accumulation_buffer_output_queue.put(project_me)

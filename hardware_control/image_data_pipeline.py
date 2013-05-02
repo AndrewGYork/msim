@@ -482,6 +482,7 @@ class Display:
         
         self.display_buffers = display_buffers
         self.buffer_shape = buffer_shape
+        self.display_buffer_size = np.prod(buffer_shape[1:])
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.commands = commands
@@ -563,6 +564,25 @@ class Display:
             self.commands.send((self.intensity_scaling,
                                 self.display_min,
                                 self.display_max))
+        elif cmd == 'set_buffer_shape':
+            self.buffer_shape = args['shape']
+            self.display_buffer_size = np.prod(self.buffer_shape[1:])
+            if hasattr(self, 'display_data_16'):
+                self.display_data_16 = self.display_data_16[
+                    :buffer_shape[1],
+                    :buffer_shape[2]]
+            if hasattr(self, 'display_data_8'):
+                self.display_data_8 = np.empty(self.buffer_shape[1:],
+                                               dtype=np.uint8)
+            np.take(self.lut, self.display_data_16, out=self.display_data_8)
+            self.image = ArrayInterfaceImage(self.display_data_8,
+                                             allow_copy=False)
+            pyglet.gl.glTexParameteri( #Reset to no interpolation
+                pyglet.gl.GL_TEXTURE_2D,
+                pyglet.gl.GL_TEXTURE_MAG_FILTER,
+                pyglet.gl.GL_NEAREST)
+            self.window.set_size(self.image.width, self.image.height)
+            self.commands.send(self.buffer_shape)
         else:
             raise UserWarning("Command not recognized: %s, %s"%(
                 repr(cmd), repr(args)))
@@ -586,7 +606,8 @@ class Display:
         self.current_display_buffer = int(switch_to_me)
         self.display_data_16 = np.frombuffer(
             self.display_buffers[self.current_display_buffer].get_obj(),
-            dtype=np.uint16).reshape(self.buffer_shape[1:])
+            dtype=np.uint16)[:self.display_buffer_size
+                             ].reshape(self.buffer_shape[1:])
         return None
 
     def convert_to_8_bit(self):
@@ -714,13 +735,19 @@ def file_saving_child_process(
     output_queue,
     commands,
     ):
+    buffer_size = np.prod(buffer_shape)
     file_info = []
     while True:
         if commands.poll():
             cmd, args = commands.recv()
-            info("%s %s"%(repr(cmd), repr(args)))
             if cmd == 'file_info':
+                info("%s %s"%(repr(cmd), repr(args)))
                 file_info.append(args)
+            elif cmd == 'set_buffer_shape':
+                buffer_shape = args['shape']
+                buffer_size = np.prod(buffer_shape)
+                commands.send(buffer_shape)
+            continue
         try:
             process_me = input_queue.get_nowait()
         except Queue.Empty:
@@ -744,7 +771,8 @@ def file_saving_child_process(
                 """Copy the buffer to disk"""
                 with data_buffers[process_me].get_lock():
                     a = np.frombuffer(data_buffers[process_me].get_obj(),
-                                      dtype=np.uint16).reshape(buffer_shape)
+                                      dtype=np.uint16)[:buffer_size
+                                                       ].reshape(buffer_shape)
                     simple_tif.array_to_tif(a, **args)
             info("end buffer %i"%(process_me))
             output_queue.put(process_me)

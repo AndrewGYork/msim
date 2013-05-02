@@ -55,16 +55,18 @@ class Laser_Shutters:
         else:
             raise UserWarning("Shutter state not understood.")
 
-    def open(self, color='488'):
-        print "Opening shutter:", color
+    def open(self, color='488', verbose=True):
+        if verbose:
+            print "Opening shutter:", color
         if self.states[color]:
             pass
         else:
             self.toggle(color, verbose=False)
             time.sleep(self.delay)
 
-    def shut(self, color='488'):
-        print "Shutting shutter:", color
+    def shut(self, color='488', verbose=True):
+        if verbose:
+            print "Shutting shutter:", color
         if self.states[color]:
             self.toggle(color, verbose=False)
         else:

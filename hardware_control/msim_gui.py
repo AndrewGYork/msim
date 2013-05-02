@@ -23,7 +23,11 @@ class GUI:
         self.data_pipeline = Image_Data_Pipeline(
             num_buffers=5,
             buffer_shape=(224, 480, 480))
+        self.camera_settings = {}
+        self.camera_roi = (961, 841, 1440, 1320)
         self.dmd = ALP()
+        self.dmd_settings = {}
+        self.dmd_num_frames = 0
         self.root = tk.Tk()
         try:
             self.root.iconbitmap(default='microscope.ico')
@@ -110,43 +114,117 @@ class GUI:
         frame = tk.Frame(self.root)
         frame.pack(side=tk.TOP)
         
-        a.pack(side=tk.LEFT)
-        a = tk.Button(
-            frame, text="Load buffers",
-            command=self.load_buffers)
-        a.pack(side=tk.LEFT)
-        
-        self.file_num = 0
-        a = tk.Button(
-            frame, text="Load buffers and save",
-            command=self.load_and_save)
-        a.pack(side=tk.LEFT)
+##        a.pack(side=tk.LEFT)
+##        a = tk.Button(
+##            frame, text="Load buffers",
+##            command=self.load_buffers)
+##        a.pack(side=tk.LEFT)
+##        
+##        self.file_num = 0
+##        a = tk.Button(
+##            frame, text="Load buffers and save",
+##            command=self.load_and_save)
+##        a.pack(side=tk.LEFT)
 
         self.data_pipeline.set_display_intensity_scaling(
             'median_filter_autoscale', display_min=0, display_max=0)
         self.root.after(50, self.load_config)
         self.root.mainloop()
         self.data_pipeline.close()
+        self.dmd.close()
         return None
 
-    def load_buffers(self):
-        self.data_pipeline.collect_data_buffers()
-        self.data_pipeline.load_data_buffers(
-            len(self.data_pipeline.idle_buffers))
-        return None
+##    def load_buffers(self):
+##        self.data_pipeline.collect_data_buffers()
+##        self.data_pipeline.load_data_buffers(
+##            len(self.data_pipeline.idle_buffers))
+##        return None
+##
+##    def load_and_save(self):
+##        self.data_pipeline.collect_data_buffers()
+##        num_buffers = len(self.data_pipeline.idle_buffers)
+##        file_info = []
+##        for b in self.data_pipeline.idle_buffers:
+##            file_info.append(
+##                {'buffer_number': b,
+##                 'outfile': 'image_%06i.tif'%(self.file_num)
+##                 })
+##            self.file_num += 1
+##        self.data_pipeline.load_data_buffers(
+##            num_buffers, file_saving_info=file_info)
+##        return None
 
-    def load_and_save(self):
-        self.data_pipeline.collect_data_buffers()
-        num_buffers = len(self.data_pipeline.idle_buffers)
-        file_info = []
-        for b in self.data_pipeline.idle_buffers:
-            file_info.append(
-                {'buffer_number': b,
-                 'outfile': 'image_%06i.tif'%(self.file_num)
-                 })
-            self.file_num += 1
+    def snap(self, dmd_settings, camera_settings, file_saving_info=None):
+        """
+        First, we need to check if the DMD settings need to update.
+        """
+        for k in (dmd_settings.keys() + self.dmd_settings.keys()):
+            try:
+                assert dmd_settings[k] == self.dmd_settings[k]
+            except (KeyError, AssertionError):
+                """
+                Mismatch, re-apply DMD settings
+                """
+                self.num_dmd_frames = self.dmd.apply_settings(**dmd_settings)
+                self.dmd_settings = dmd_settings
+                break
+        """
+        Now, we need to check if the camera settings need to update.
+        """
+        for k in (camera_settings.keys() + self.camera_settings.keys()):
+            try:
+                assert camera_settings[k] == self.camera_settings[k]
+            except (KeyError, AssertionError):
+                """
+                Mismatch, re-apply camera settings
+                """
+                self.data_pipeline.camera.commands.send((
+                    'apply_settings', camera_settings))
+                try:
+                    trigger, exposure, self.camera_roi = (
+                        self.data_pipeline.camera.commands.recv())
+                except TypeError:
+                    print "Looks like we're using the dummy camera."
+                self.camera_settings = camera_settings
+                break
+        num_camera_lr_pix = 1 + self.camera_roi[2] - self.camera_roi[0]
+        num_camera_ud_pix = 1 + self.camera_roi[3] - self.camera_roi[1]
+        if (num_camera_lr_pix * num_camera_ud_pix * self.num_dmd_frames >
+            self.data_pipeline.buffer_size):
+            """
+            The data pipeline buffers are too small to hold this snap.
+            Make a new pipeline with larger buffers.
+            """
+            print "Enlarging data pipeline buffers..."
+            num_buffers = self.data_pipeline.num_data_buffers
+            self.data_pipeline.close()
+            self.data_pipeline = Image_Data_Pipeline(
+                num_buffers=num_buffers,
+                buffer_shape = (self.num_dmd_frames,
+                                num_camera_ud_pix,
+                                num_camera_lr_pix))
+            self.data_pipeline.camera.commands.send(
+                'apply_settings', self.camera_settings)
+        elif (
+            (self.num_dmd_frames, num_camera_ud_pix, num_camera_lr_pix) !=
+            self.data_pipeline.buffer_shape):
+            """
+            The data pipline buffers are at least as big as they need
+            to be, but not the right shape. Tell the pipeline to use
+            only part of the buffer.
+            """
+            self.data_pipeline.set_buffer_shape((self.num_dmd_frames,
+                                                 num_camera_ud_pix,
+                                                 num_camera_lr_pix))
+        """
+        Ready to acquire an image! Load buffers to the pipeline, and
+        play the DMD pattern.
+        """
+        while len(self.data_pipeline.idle_data_buffers) < 1:
+            self.data_pipeline.collect_data_buffers()
         self.data_pipeline.load_data_buffers(
-            num_buffers, file_saving_info=file_info)
+            1, file_saving_info=file_saving_info)
+        self.dmd.display_pattern()
         return None
 
     def open_display_settings_window(self):
@@ -248,9 +326,6 @@ class GUI:
 
     def calibrate(self, color):
         calibration_window = Calibration_Window(self, color)
-        return None
-
-    def snap(self):
         return None
 
 class Display_Settings_Window:
@@ -382,7 +457,6 @@ class Calibration_Window:
         a = tk.Button(frame, text='Cancel', command=self.cancel)
         a.bind('<Return>', lambda x: self.cancel())
         a.pack(side=tk.LEFT)
-        
         return None
 
     def alignment_mode(self):
@@ -398,36 +472,31 @@ class Calibration_Window:
         frame.pack(side=tk.TOP)
         a = tk.Button(frame, text='Ok', command=self.acquire_calibration)
         a.focus_set()
-        a.bind('<Return>', lambda x: self.alignment_mode())
+        a.bind('<Return>', lambda x: self.acquire_calibration())
         a.pack(side=tk.LEFT)
         a = tk.Button(frame, text='Cancel', command=self.cancel)
         a.bind('<Return>', lambda x: self.cancel())
         a.pack(side=tk.LEFT)
-        self.parent.data_pipeline.camera.commands.send((
-            'frames_per_acquisition', {'frames_per_acquisition': 1}))
-        assert self.parent.data_pipeline.camera.commands.recv() == 1
-        self.parent.dmd.apply_settings(
-            illuminate_time=2200,
-            illumination_filename='alignment_pattern.raw')
         self.aligning = True
         self.play_alignment_pattern()
         return None
-
+    
     def play_alignment_pattern(self):
-        while len(self.parent.data_pipeline.idle_buffers) < 1:
-            self.parent.data_pipeline.collect_data_buffers()
-        self.parent.data_pipeline.load_data_buffers(1)
-        self.parent.dmd.display_pattern()
+        dmd_settings = {
+            'illuminate_time': 2200,
+            'illumination_filename': 'alignment_pattern.raw',
+            }
+        camera_settings = {
+            'exposure_time_microseconds': 2200,
+            'trigger': 'external trigger/software exposure control',
+            }
+        self.parent.snap(dmd_settings, camera_settings)
         if self.aligning:
             self.root.after(50, self.play_alignment_pattern)
         return None
 
     def acquire_calibration(self):
         self.aligning = False
-        self.parent.data_pipeline.camera.commands.send((
-            'frames_per_acquisition',
-            {'frames_per_acquisition': 'buffer_size'}))
-        assert self.parent.data_pipeline.camera.commands.recv() == 'buffer_size'
         self.frame.pack_forget()
         self.frame = tk.Frame(self.root)
         self.frame.pack(side=tk.TOP, fill=tk.BOTH)

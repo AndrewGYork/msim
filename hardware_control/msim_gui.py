@@ -1,6 +1,6 @@
 import sys
 import os
-##import time
+import time
 import logging
 import ConfigParser
 import datetime
@@ -14,10 +14,10 @@ from dmd import ALP
 from shutters import Laser_Shutters
 from wheel import Filter_Wheel
 
-##if sys.platform == 'win32':
-##    clock = time.clock
-##else:
-##    clock = time.time
+if sys.platform == 'win32':
+    clock = time.clock
+else:
+    clock = time.time
 
 class GUI:
     def __init__(self):
@@ -28,13 +28,19 @@ class GUI:
             buffer_shape=(224, 480, 480))
         self.camera_settings = {}
         self.camera_roi = (961, 841, 1440, 1320)
+        self.data_pipeline.camera.commands.send(('get_preframes', {}))
+        while True:
+            if self.data_pipeline.camera.commands.poll():
+                self.camera_preframes = (
+                    self.data_pipeline.camera.commands.recv())
+                break
         self.dmd = ALP()
         self.dmd_settings = {}
         self.dmd_num_frames = 0
         self.lasers = ['561', '488']
         self.shutters = Laser_Shutters(colors=self.lasers,
                                        pause_after_open=0.2)
-        self.shutter_timeout_seconds = 0
+        self.shutter_timeout = -1
         self.filters = Filter_Wheel(initial_position='f3',
                                     wheel_delay=1.8)
         self.root = tk.Tk()
@@ -56,6 +62,8 @@ class GUI:
             label="Brightfield mode", command=self.open_brightfield_window)
         self.settingsmenu.add_command(
             label="Emission filters", command=self.open_filter_window)
+        self.settingsmenu.add_command(
+            label="SIM pattern", command=self.open_pattern_window)
         self.menubar.add_cascade(label="Settings", menu=self.settingsmenu)
         self.root.config(menu=self.menubar)
 
@@ -63,6 +71,10 @@ class GUI:
         for c in self.lasers:
             self.emission_filters[c] = tk.StringVar()
             self.emission_filters[c].set('Filter 3')
+
+        self.sim_patterns = {}
+        for c in self.lasers:
+            self.sim_patterns[c] = 'illumination_pattern_16x14.raw'
 
         self.laser_power = {}
         self.laser_on = {}
@@ -163,17 +175,18 @@ class GUI:
 ##            num_buffers, file_saving_info=file_info)
 ##        return None
 
-    def snap(self, color, dmd_settings, camera_settings, file_saving_info=None):
+    def snap(self, color, dmd_settings, camera_settings, file_name=None):
         """
         First, we need to check if the DMD settings need to update.
         """
         self.filters.move('f' + self.emission_filters[color].get().split()[-1])
         print "Snapping", color
         if 'illuminate_time' in dmd_settings:
-            dmd_settings['illuminate_time'] = int(
-                dmd_settings['illuminate_time'] *
-                0.01 * self.laser_power[color].get())
-            print dmd_settings['illuminate_time']
+            dmd_settings['illuminate_time'] = max(
+                15,
+                int(
+                    dmd_settings['illuminate_time'] *
+                    0.01 * self.laser_power[color].get()))
         else:
             raise UserWarning("DMD settings didn't contain 'illuminate_time'")
         if 'picture_time' not in dmd_settings:
@@ -209,7 +222,10 @@ class GUI:
                 break
         num_camera_lr_pix = 1 + self.camera_roi[2] - self.camera_roi[0]
         num_camera_ud_pix = 1 + self.camera_roi[3] - self.camera_roi[1]
-        if (num_camera_lr_pix * num_camera_ud_pix * self.num_dmd_frames >
+        if (num_camera_lr_pix *
+            num_camera_ud_pix *
+            (self.num_dmd_frames - self.camera_preframes
+             ) >
             self.data_pipeline.buffer_size):
             """
             The data pipeline buffers are too small to hold this snap.
@@ -218,42 +234,55 @@ class GUI:
             print "Enlarging data pipeline buffers..."
             num_buffers = self.data_pipeline.num_data_buffers
             self.data_pipeline.close()
+            print num_buffers
+            print (self.num_dmd_frames - self.camera_preframes,
+                   num_camera_ud_pix,
+                   num_camera_lr_pix)
             self.data_pipeline = Image_Data_Pipeline(
                 num_buffers=num_buffers,
-                buffer_shape = (self.num_dmd_frames,
+                buffer_shape = (self.num_dmd_frames - self.camera_preframes,
                                 num_camera_ud_pix,
                                 num_camera_lr_pix))
-            self.data_pipeline.camera.commands.send(
-                'apply_settings', self.camera_settings)
+            self.data_pipeline.camera.commands.send((
+                'apply_settings', self.camera_settings))
         elif (
-            (self.num_dmd_frames, num_camera_ud_pix, num_camera_lr_pix) !=
+            (self.num_dmd_frames - self.camera_preframes,
+             num_camera_ud_pix,
+             num_camera_lr_pix) !=
             self.data_pipeline.buffer_shape):
             """
             The data pipline buffers are at least as big as they need
             to be, but not the right shape. Tell the pipeline to use
             only part of the buffer.
             """
-            self.data_pipeline.set_buffer_shape((self.num_dmd_frames,
-                                                 num_camera_ud_pix,
-                                                 num_camera_lr_pix))
+            self.data_pipeline.set_buffer_shape(
+                (self.num_dmd_frames - self.camera_preframes,
+                 num_camera_ud_pix,
+                 num_camera_lr_pix))
         """
         Ready to acquire an image! Load buffers to the pipeline, and
         play the DMD pattern.
         """
         while len(self.data_pipeline.idle_data_buffers) < 1:
             self.data_pipeline.collect_data_buffers()
+        if file_name is None:
+            file_info = None
+        else:
+            file_info = [
+                {'buffer_number': self.data_pipeline.idle_data_buffers[0],
+                 'outfile': file_name}]
         for c in self.lasers:
             if c == color:
                 pass
             else:
                 self.shutters.shut(c, verbose=False)
         expected_shutter_duration = (
-            0.001 * self.dmd_settings['picture_time'] * self.num_dmd_frames)
-        self.shutter_timeout_seconds = max(self.shutter_timeout_seconds,
-                                           expected_shutter_duration + 0.2)
+            1e-6 * self.dmd_settings['picture_time'] * self.num_dmd_frames)
         self.shutters.open(color, verbose=False)
-        self.data_pipeline.load_data_buffers(
-            1, file_saving_info=file_saving_info)
+        self.shutter_timeout = max(
+            self.shutter_timeout,
+            expected_shutter_duration + 0.2 + clock())
+        self.data_pipeline.load_data_buffers(1, file_saving_info=file_info)
         self.dmd.display_pattern(verbose=False)
         self.data_pipeline.camera.commands.send(('get_status', {}))
         while True:
@@ -263,12 +292,13 @@ class GUI:
         return None
 
     def close_shutters(self):
-        if self.shutter_timeout_seconds > 0:
-            self.shutter_timeout_seconds -= 0.3
-            if self.shutter_timeout_seconds <= 0:
+        if self.shutter_timeout >= 0:
+##            print "Shutter time until closed:", self.shutter_timeout - clock()
+            if self.shutter_timeout < clock():
                 for c in self.lasers:
                     self.shutters.shut(c)
-        self.root.after(50, self.close_shutters)
+                self.shutter_timeout = -1
+        self.root.after(100, self.close_shutters)
         return None
 
     def open_display_settings_window(self):
@@ -291,6 +321,15 @@ class GUI:
             self.filter_window = Filter_Window(self)
         self.filter_window.root.lift()
         self.filter_window.root.focus_force()
+        return None
+    
+    def open_pattern_window(self):
+        try:
+            self.pattern_window.root.config()
+        except (AttributeError, tk.TclError):
+            self.pattern_window = Pattern_Window(self)
+        self.pattern_window.root.lift()
+        self.pattern_window.root.focus_force()
         return None
 
     def report_callback_exception(self, *args):
@@ -340,15 +379,23 @@ class GUI:
         """Try to get path and age of the lake calibration data"""
         now = datetime.datetime.now()
         for c in self.lasers:
+            """
+            Assume the worst!
+            """
+            self.lake_info[c]['button'].config(bg='red', fg='white')
+            self.lake_info[c]['calibration'] = 'None'
             try:
                 self.lake_info[c]['path'] = self.config.get(
-                    c + ' calibration', 'path')
+                    c + ' calibration ' + self.sim_patterns[c], 'path')
+                print self.lake_info[c]['path']
                 self.lake_info[c]['date'] = self.config.get(
-                    c + ' calibration', 'date').split()
+                    c + ' calibration ' + self.sim_patterns[c], 'date').split()
+                print self.lake_info[c]['date']
                 assert os.path.exists(self.lake_info[c]['path'])
             except (ConfigParser.NoSectionError,
                     ConfigParser.NoOptionError,
                     AssertionError) as e:
+                print e
                 continue
             try:
                 lake_date = datetime.datetime(
@@ -360,10 +407,11 @@ class GUI:
                 print "Yellow"
                 """The lake data exists, but is more than one day old"""
                 self.lake_info[c]['button'].config(bg='yellow', fg='black')
+                self.lake_info[c]['calibration'] = 'Old'
             else:
                 print "Gray"
                 self.lake_info[c]['button'].config(bg='gray', fg='black')
-                
+                self.lake_info[c]['calibration'] = 'Good'
         with open('config.ini', 'w') as configfile:
             self.config.write(configfile)
         return None
@@ -473,6 +521,50 @@ class Filter_Window:
             a.pack(side=tk.LEFT)
         return None
 
+class Pattern_Window:
+    def __init__(self, parent):
+        self.parent = parent
+        self.root = tk.Toplevel(parent.root)
+        self.root.wm_title("SIM pattern selection")
+        self.root.bind("<Escape>", lambda x: self.root.destroy())
+
+        available_patterns = {
+            120: 'illumination_pattern_12x10.raw',
+            224: 'illumination_pattern_16x14.raw',
+            288: 'illumination_pattern_18x16.raw',
+            340: 'illumination_pattern_20x17.raw',
+            504: 'illumination_pattern_24x21.raw',
+            672: 'illumination_pattern_28x24.raw',
+            896: 'illumination_pattern_32x28.raw',
+            }
+
+        self.pattern_choice = {}
+        for c in self.parent.lasers:
+            frame = tk.Frame(self.root)
+            frame.pack(side=tk.TOP, fill=tk.BOTH)
+            a = tk.Label(master=frame, text=c + ' nm laser\nSIM pattern:')
+            a.pack(side=tk.LEFT)
+            self.pattern_choice[c] = tk.StringVar()
+            self.pattern_choice[c].set(self.parent.sim_patterns[c])
+            a = tk.OptionMenu(frame, self.pattern_choice[c],
+                              *[available_patterns[k]
+                                for k in sorted(available_patterns.keys())])
+            a.pack(side=tk.LEFT)
+        frame = tk.Frame(self.root)
+        frame.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Button(frame, text='Apply settings',
+                      command=lambda: self.change_sim_pattern())
+        a.focus_set()
+        a.bind('<Return>', lambda x: self.change_sim_pattern())
+        a.pack(side=tk.TOP)
+        return None
+
+    def change_sim_pattern(self):
+        for c in self.parent.lasers:
+            self.parent.sim_patterns[c] = self.pattern_choice[c].get()
+        self.parent.load_config()
+        return None
+
 class Calibration_Window:
     def __init__(self, parent, color):
         self.parent = parent
@@ -495,12 +587,15 @@ class Calibration_Window:
             label="Display", command=self.parent.open_display_settings_window)
         self.settingsmenu.add_command(
             label="Emission filters", command=self.parent.open_filter_window)
+        self.settingsmenu.add_command(
+            label="SIM pattern", command=self.parent.open_pattern_window)
         self.menubar.add_cascade(label="Settings", menu=self.settingsmenu)
         self.root.config(menu=self.menubar)
 
         self.frame = tk.Frame(self.root)
         self.frame.pack(side=tk.TOP, fill=tk.BOTH)
-        a = tk.Label(self.frame, text="Calibration mode.\n\n" +
+        a = tk.Label(self.frame,
+                     text="Calibration mode: %s nm laser\n\n"%(color) +
                      "Put a fluorescent lake slide on the microscope.\n" +
                      "Click 'Ok' when the slide is in place.\n" +
                      "\nWARNING!\n\n" +
@@ -527,16 +622,7 @@ class Calibration_Window:
                      "You should see an array of spots.\n" +
                      "Click 'Ok' when the spots are visible.\n")
         a.pack(side=tk.TOP)
-        frame = tk.Frame(self.frame)
-        frame.pack(side=tk.TOP)
-        a = tk.Button(frame, text='Ok', command=self.acquire_calibration)
-        a.focus_set()
-        a.bind('<Return>', lambda x: self.acquire_calibration())
-        a.pack(side=tk.LEFT)
-        a = tk.Button(frame, text='Cancel', command=self.cancel)
-        a.bind('<Return>', lambda x: self.cancel())
-        a.pack(side=tk.LEFT)
-        subframe = tk.Frame(frame)
+        subframe = tk.Frame(self.frame)
         subframe.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
         a = tk.Label(subframe, text='Laser power:\n'+color+' nm (%)')
         a.pack(side=tk.LEFT)
@@ -548,25 +634,39 @@ class Calibration_Window:
                 lambda: self.parent.laser_power[color].set(
                     self.laser_power.get())))
         self.laser_power.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
+        frame = tk.Frame(self.frame)
+        frame.pack(side=tk.TOP)
+        a = tk.Button(
+            frame, text='Ok', command=lambda: self.acquire_calibration(color))
+        a.focus_set()
+        a.bind('<Return>', lambda x: self.acquire_calibration(color))
+        a.pack(side=tk.LEFT)
+        a = tk.Button(frame, text='Cancel', command=self.cancel)
+        a.bind('<Return>', lambda x: self.cancel())
+        a.pack(side=tk.LEFT)
         self.aligning = True
         self.play_alignment_pattern(color)
         return None
     
     def play_alignment_pattern(self, color):
+        if not self.aligning:
+            return None
         dmd_settings = {
             'illuminate_time': 2200,
-            'illumination_filename': 'alignment_pattern.raw',
+            'illumination_filename': os.path.join(
+                os.getcwd(), 'patterns', self.parent.sim_patterns[color]),
+            'first_frame': 0,
+            'last_frame': self.parent.camera_preframes,
             }
         camera_settings = {
             'exposure_time_microseconds': 2200,
             'trigger': 'external trigger/software exposure control',
             }
         self.parent.snap(color, dmd_settings, camera_settings)
-        if self.aligning:
-            self.root.after(50, lambda: self.play_alignment_pattern(color))
+        self.root.after(50, lambda: self.play_alignment_pattern(color))
         return None
 
-    def acquire_calibration(self):
+    def acquire_calibration(self, color):
         self.aligning = False
         self.frame.pack_forget()
         self.frame = tk.Frame(self.root)
@@ -574,15 +674,43 @@ class Calibration_Window:
         a = tk.Label(self.frame, text="Calibration mode.\n\n" +
                      "Acquiring calibration...")
         a.pack(side=tk.TOP)
-        a = tk.Button(self.frame, text='Cancel', command=self.cancel)
-        a.bind('<Return>', lambda x: self.cancel())
-        a.pack(side=tk.TOP)
+##        a = tk.Button(self.frame, text='Cancel', command=self.cancel)
+##        a.bind('<Return>', lambda x: self.cancel())
+##        a.pack(side=tk.TOP)
+        dmd_settings = {
+            'illuminate_time': 2200,
+            'illumination_filename': os.path.join(
+                os.getcwd(), 'patterns', self.parent.sim_patterns[color]),
+            }
+        camera_settings = {
+            'exposure_time_microseconds': 2200,
+            'trigger': 'external trigger/software exposure control',
+            }
+        file_basename = ('lake' +
+                         '_%s_'%(color) +
+                         os.path.splitext(self.parent.sim_patterns[color])[0] +
+                         '.tif')
+        file_name = os.path.join(os.getcwd(), 'calibrations', file_basename)
+        self.parent.snap(
+            color, dmd_settings, camera_settings, file_name)
+        section = color + ' calibration ' + self.parent.sim_patterns[color]
+        if not self.parent.config.has_section(section):
+            self.parent.config.add_section(section)
+        self.parent.config.set(section, 'path', file_name)
+        now = datetime.datetime.now()
+        self.parent.config.set(
+            section, 'date', '%i %i %i %i'%(
+                now.year, now.month, now.day, now.hour))
+        with open('config.ini', 'w') as configfile:
+            self.parent.config.write(configfile)
+        self.cancel()
         return None
     
     def cancel(self):
         self.root.withdraw()
         self.parent.root.deiconify()
         self.root.destroy()
+        self.parent.load_config()
         return None
     
 class Scale_Spinbox:

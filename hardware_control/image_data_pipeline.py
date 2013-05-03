@@ -89,27 +89,40 @@ class Image_Data_Pipeline:
             self.projection.display_buffer_input_queue)
         return None
     
-    def load_data_buffers(self, N, timeout=0, file_saving_info=None):
+    def load_data_buffers(
+        self, N, timeout=0, file_saving_info=None, collect_buffers=True):
         if file_saving_info is not None:
             if len(file_saving_info) != N:
                 raise UserWarning(
                     "If file saving info is provided, it must match the number" +
                     " of buffers loaded.")
-            else:
-                for i in file_saving_info:
-                    self.file_saving.commands.send(('file_info', i))
         """
         Feed the pipe!
         """
         for i in range(N):
+            """
+            Get an idle buffer
+            """
             for tries in range(10):
                 try:
-                    self.camera.input_queue.put(self.idle_data_buffers.pop(0))
+                    idle_buffer = self.idle_data_buffers.pop(0)
                     break
                 except IndexError:
+                    if collect_buffers:
+                        self.collect_data_buffers()
                     time.sleep(timeout * 0.1)
             else:
-                raise UserWarning("Timeout exceeded")
+                raise UserWarning("Timeout exceeded, no buffer available")
+            """
+            Load the buffer into the queue, along with file saving
+            info if appropriate
+            """
+            if file_saving_info is not None:
+                args = file_saving_info.pop(0)
+                args['buffer_number'] = idle_buffer
+                self.file_saving.commands.send(('file_info', args))
+            self.camera.input_queue.put(idle_buffer)
+        return None
 
     def collect_data_buffers(self):
         while True:

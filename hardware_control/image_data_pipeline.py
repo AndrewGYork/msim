@@ -42,7 +42,7 @@ class Image_Data_Pipeline:
         8-bit buffers for display data.
         """
         self.buffer_shape = buffer_shape
-        self.buffer_size = np.prod(buffer_shape)
+        self.buffer_size = int(np.prod(buffer_shape))
         self.num_data_buffers = num_buffers
         
         self.data_buffers = [mp.Array(ctypes.c_uint16, self.buffer_size)

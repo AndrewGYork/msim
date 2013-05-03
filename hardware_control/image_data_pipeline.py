@@ -163,6 +163,9 @@ class Image_Data_Pipeline:
         self.display.commands.send(('get_intensity_scaling', args))
         return self.display.commands.recv()
 
+    def withdraw_display(self):
+        self.display.commands.send(('withdraw', {}))
+
     def close(self):
         self.camera.input_queue.put(None)
         self.accumulation.input_queue.put(None)
@@ -586,6 +589,8 @@ class Display:
                 pyglet.gl.GL_NEAREST)
             self.window.set_size(self.image.width, self.image.height)
             self.commands.send(self.buffer_shape)
+        elif cmd == 'withdraw':
+            self.window.set_visible(False)
         else:
             raise UserWarning("Command not recognized: %s, %s"%(
                 repr(cmd), repr(args)))

@@ -4,6 +4,7 @@ import time
 import logging
 import ConfigParser
 import datetime
+import subprocess
 import multiprocessing as mp
 import Tkinter as tk
 import tkMessageBox
@@ -21,11 +22,13 @@ else:
 
 class GUI:
     def __init__(self):
+        save_location = Data_Directory_Subprocess()
         logger = mp.log_to_stderr()
         logger.setLevel(logging.WARNING)
         self.data_pipeline = Image_Data_Pipeline(
-            num_buffers=5,
-            buffer_shape=(224, 480, 480))
+            num_buffers=3,
+            buffer_shape=(896, 480, 480))
+        self.data_pipeline.withdraw_display()
         self.camera_settings = {}
         self.camera_roi = (961, 841, 1440, 1320)
         self.data_pipeline.camera.commands.send(('get_preframes', {}))
@@ -132,50 +135,23 @@ class GUI:
 ##            "<Button-1>", lambda x: self.snap_button.focus_set())
 ##        self.snap_button.pack(side=tk.TOP)
 
-##        frame = tk.Frame(self.root)
-##        frame.pack(side=tk.TOP)  
-##        a.pack(side=tk.LEFT)
-##        a = tk.Button(
-##            frame, text="Load buffers",
-##            command=self.load_buffers)
-##        a.pack(side=tk.LEFT)
-##        
-##        self.file_num = 0
-##        a = tk.Button(
-##            frame, text="Load buffers and save",
-##            command=self.load_and_save)
-##        a.pack(side=tk.LEFT)
-
         self.data_pipeline.set_display_intensity_scaling(
             'median_filter_autoscale', display_min=0, display_max=0)
         self.root.after(50, self.load_config)
         self.root.after(50, self.close_shutters)
+        self.root.after(50, lambda: save_location.get(self))
         self.root.mainloop()
         self.data_pipeline.close()
         self.dmd.close()
         return None
 
-##    def load_buffers(self):
-##        self.data_pipeline.collect_data_buffers()
-##        self.data_pipeline.load_data_buffers(
-##            len(self.data_pipeline.idle_buffers))
-##        return None
-##
-##    def load_and_save(self):
-##        self.data_pipeline.collect_data_buffers()
-##        num_buffers = len(self.data_pipeline.idle_buffers)
-##        file_info = []
-##        for b in self.data_pipeline.idle_buffers:
-##            file_info.append(
-##                {'buffer_number': b,
-##                 'outfile': 'image_%06i.tif'%(self.file_num)
-##                 })
-##            self.file_num += 1
-##        self.data_pipeline.load_data_buffers(
-##            num_buffers, file_saving_info=file_info)
-##        return None
-
-    def snap(self, color, dmd_settings, camera_settings, file_name=None):
+    def snap(self,
+             color,
+             dmd_settings,
+             camera_settings,
+             file_name=None,
+             display=False,
+             brightfield=False):
         """
         First, we need to check if the DMD settings need to update.
         """
@@ -263,14 +239,10 @@ class GUI:
         Ready to acquire an image! Load buffers to the pipeline, and
         play the DMD pattern.
         """
-        while len(self.data_pipeline.idle_data_buffers) < 1:
-            self.data_pipeline.collect_data_buffers()
         if file_name is None:
             file_info = None
         else:
-            file_info = [
-                {'buffer_number': self.data_pipeline.idle_data_buffers[0],
-                 'outfile': file_name}]
+            file_info = [{'outfile': file_name}]
         for c in self.lasers:
             if c == color:
                 pass
@@ -278,22 +250,30 @@ class GUI:
                 self.shutters.shut(c, verbose=False)
         expected_shutter_duration = (
             1e-6 * self.dmd_settings['picture_time'] * self.num_dmd_frames)
-        self.shutters.open(color, verbose=False)
-        self.shutter_timeout = max(
-            self.shutter_timeout,
-            expected_shutter_duration + 0.2 + clock())
+        if not brightfield:
+            self.shutters.open(color, verbose=False)
+            self.shutter_timeout = max(
+                self.shutter_timeout,
+                expected_shutter_duration + 0.2 + clock())
         self.data_pipeline.load_data_buffers(1, file_saving_info=file_info)
         self.dmd.display_pattern(verbose=False)
         self.data_pipeline.camera.commands.send(('get_status', {}))
-        while True:
-            if self.data_pipeline.camera.commands.poll():
-                camera_status = self.data_pipeline.camera.commands.recv()
-                break
+        self.root.after_idle(self.check_camera_status)
+        if display and file_name is not None:
+            self.root.after_idle(lambda: self.open_tif_in_imagej(file_name))
+        return None
+
+    def check_camera_status(self):
+        if self.data_pipeline.camera.commands.poll():
+            camera_status = self.data_pipeline.camera.commands.recv()
+            return None
+        else:
+            self.root.after_idle(self.check_camera_status)
         return None
 
     def close_shutters(self):
         if self.shutter_timeout >= 0:
-##            print "Shutter time until closed:", self.shutter_timeout - clock()
+            print "Shutter time until closed:", self.shutter_timeout - clock()
             if self.shutter_timeout < clock():
                 for c in self.lasers:
                     self.shutters.shut(c)
@@ -311,7 +291,7 @@ class GUI:
         return None
 
     def open_brightfield_window(self):
-        """TODO"""
+        Brightfield_Window(self)
         return None
 
     def open_filter_window(self):
@@ -391,11 +371,18 @@ class GUI:
                 self.lake_info[c]['date'] = self.config.get(
                     c + ' calibration ' + self.sim_patterns[c], 'date').split()
                 print self.lake_info[c]['date']
-                assert os.path.exists(self.lake_info[c]['path'])
             except (ConfigParser.NoSectionError,
-                    ConfigParser.NoOptionError,
-                    AssertionError) as e:
+                    ConfigParser.NoOptionError) as e:
                 print e
+                continue
+            for i in range(10):
+                try:
+                    assert os.path.exists(self.lake_info[c]['path'])
+                    break
+                except AssertionError:
+                    time.sleep(0.1)
+            else:
+                print "Lake info not found:", self.lake_info[c]['path']
                 continue
             try:
                 lake_date = datetime.datetime(
@@ -417,10 +404,30 @@ class GUI:
         return None
 
     def calibrate(self, color):
-        print color
         calibration_window = Calibration_Window(self, color)
         return None
-
+    
+    def open_tif_in_imagej(self, filename, force_existence=False, tries_left=5):
+        try:
+            imagej_path = self.config.get('ImageJ', 'path')
+        except:
+            raise UserWarning("ImageJ path is not configured." +
+                              "Delete or modify config.ini to fix this.")
+        print repr(filename)
+        cmd = """run("TIFF Virtual Stack...", "open=%s");"""%(
+            str(filename).replace('\\', '\\\\'))
+        if os.path.exists(filename):
+            print "Command to ImageJ:\n", repr(cmd)
+            subprocess.Popen([imagej_path, "-eval", cmd])
+        else:
+            print "Waiting for file existence..."
+            if force_existence and tries_left > 0:
+                self.root.after(200, lambda: self.open_tif_in_imagej(
+                    filename, force_existence, tries_left=tries_left - 1))
+            else:
+                raise UserWarning("Timeout exceeded; file may not exist.")
+        return None
+    
 class Display_Settings_Window:
     def __init__(self, parent):
         self.parent = parent
@@ -565,6 +572,76 @@ class Pattern_Window:
         self.parent.load_config()
         return None
 
+class Brightfield_Window:
+    def __init__(self, parent):
+        self.parent = parent
+        self.root = tk.Toplevel(parent.root)
+        self.root.wm_title("Transmitted light mode")
+        self.root.bind("<Escape>", lambda x: self.cancel())
+        self.root.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.root.lift()
+        self.root.focus_force()
+        self.parent.root.withdraw()
+
+        self.menubar = tk.Menu(self.root)
+        self.filemenu = tk.Menu(self.menubar, tearoff=0)
+        self.filemenu.add_command(
+            label="Exit", command=self.parent.root.destroy)
+        self.menubar.add_cascade(label="File", menu=self.filemenu)
+        self.settingsmenu = tk.Menu(self.menubar, tearoff=0)
+        self.settingsmenu.add_command(
+            label="Fluorescence mode", command=self.cancel)
+        self.settingsmenu.add_command(
+            label="Display", command=self.parent.open_display_settings_window)
+        self.settingsmenu.add_command(
+            label="Emission filters", command=self.parent.open_filter_window)
+        self.menubar.add_cascade(label="Settings", menu=self.settingsmenu)
+        self.root.config(menu=self.menubar)
+
+        self.frame = tk.Frame(self.root)
+        self.frame.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(self.frame,
+                     text="Transmitted light mode\n\n" +
+                     "Turn on the microscope lamp.\n")
+        a.pack(side=tk.TOP)
+        frame = tk.Frame(self.frame)
+        frame.pack(side=tk.TOP)
+        a = tk.Button(frame, text='Fluorescence mode', command=self.cancel)
+        a.bind('<Return>', lambda x: self.cancel())
+        a.pack(side=tk.LEFT)
+        self.taking_snaps = True
+        self.take_brightfield_snap()
+        return None
+
+    def take_brightfield_snap(self):
+        if not self.taking_snaps:
+            return None
+        color = '488'
+        dmd_settings = {
+            'illuminate_time': 2200,
+            'illumination_filename': os.path.join(
+                os.getcwd(), 'patterns', self.parent.sim_patterns[color]),
+            'first_frame': 0,
+            'last_frame': self.parent.camera_preframes,
+            }
+        camera_settings = {
+            'exposure_time_microseconds': 2200,
+            'trigger': 'external trigger/software exposure control',
+            }
+        self.parent.snap(color, dmd_settings, camera_settings, brightfield=True)
+        self.root.after(50, lambda: self.take_brightfield_snap())
+        return None
+
+    def cancel(self):
+        self.taking_snaps = False
+        self.root.withdraw()
+        tkMessageBox.showwarning("Leaving brightfield mode",
+                                 "Turn off the lamp.")
+        self.parent.root.deiconify()
+        self.root.destroy()
+        self.parent.load_config()
+        return None
+
 class Calibration_Window:
     def __init__(self, parent, color):
         self.parent = parent
@@ -674,9 +751,6 @@ class Calibration_Window:
         a = tk.Label(self.frame, text="Calibration mode.\n\n" +
                      "Acquiring calibration...")
         a.pack(side=tk.TOP)
-##        a = tk.Button(self.frame, text='Cancel', command=self.cancel)
-##        a.bind('<Return>', lambda x: self.cancel())
-##        a.pack(side=tk.TOP)
         dmd_settings = {
             'illuminate_time': 2200,
             'illumination_filename': os.path.join(
@@ -692,7 +766,8 @@ class Calibration_Window:
                          '.tif')
         file_name = os.path.join(os.getcwd(), 'calibrations', file_basename)
         self.parent.snap(
-            color, dmd_settings, camera_settings, file_name)
+            color, dmd_settings, camera_settings, file_name, display=True)
+        self.parent.shutters.shut(color)
         section = color + ' calibration ' + self.parent.sim_patterns[color]
         if not self.parent.config.has_section(section):
             self.parent.config.add_section(section)
@@ -754,6 +829,57 @@ class Scale_Spinbox:
         self.spinbox_v.set(self.scale.get())
         if update_trigger: #Bind to this event for on-set
             self.frame.event_generate("<<update>>")
+        return None
+
+class Data_Directory_Subprocess:
+    def __init__(self):
+        get_data_directory_code = """
+import Tkinter, tkSimpleDialog, datetime, os, sys
+
+root = Tkinter.Tk()
+root.focus_force()
+root.withdraw()
+user_name = tkSimpleDialog.askstring(title='Login', prompt='Session name:')
+if user_name is None:
+    raise UserWarning("Aborted")
+    
+OK_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789_"
+def sanitize(s):
+    return ''.join([x for x in s if x.lower() in OK_CHARS])
+
+user_name = sanitize(user_name)
+
+now = datetime.datetime.now()
+date_string = '%04i_%02i_%02i_'%(now.year, now.month, now.day)
+
+new_folder = os.path.join("D:\\\\SIM_data", date_string + user_name)
+
+i = 1
+while os.path.exists(new_folder + '_%03i'%(i)):
+    i += 1
+    if i > 999:
+        raise UserWarning("Too many folders")
+new_folder += '_%03i'%(i)
+os.mkdir(new_folder)
+print new_folder
+"""
+        self.subprocess = subprocess.Popen(
+            [sys.executable, '-c %s'%get_data_directory_code],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+        return None
+
+    def get(self, parent):
+        result = self.subprocess.communicate()
+        data_folder = result[0].strip()
+        if os.path.exists(data_folder):
+            parent.save_directory = data_folder
+            print "Save directory:", parent.save_directory
+        else:
+            print "Data directory response:"
+            print result
+            parent.root.quit()
         return None
 
 

@@ -172,9 +172,7 @@ class Image_Data_Pipeline:
         return None
 
     def get_display_intensity_scaling(self):
-        args = {}
-        self.display.commands.send(('get_intensity_scaling', args))
-        return self.display.commands.recv()
+        return self.display.get_intensity_scaling()
 
     def withdraw_display(self):
         self.display.commands.send(('withdraw', {}))
@@ -467,16 +465,27 @@ class Data_Pipeline_Display:
         self.display_buffer_output_queue = display_buffer_output_queue
 
         self.commands, self.child_commands = mp.Pipe()
+        self.display_intensity_scaling_queue = mp.Queue()
+        self.display_intensity_scaling = ('linear', 0, 2**16 - 1)
 
         self.child = mp.Process(
             target=display_child_process,
             args=(display_buffers, buffer_shape,
                   self.display_buffer_input_queue,
                   self.display_buffer_output_queue,
-                  self.child_commands),
+                  self.child_commands,
+                  self.display_intensity_scaling_queue),
             name='Display')
         self.child.start()
         return None
+
+    def get_intensity_scaling(self):
+        try:
+            self.display_intensity_scaling = (
+                self.display_intensity_scaling_queue.get_nowait())
+        except Queue.Empty:
+            pass
+        return self.display_intensity_scaling
 
 def display_child_process(
     display_buffers,
@@ -484,6 +493,7 @@ def display_child_process(
     input_queue,
     output_queue,
     commands,
+    display_intensity_scaling_queue,
     ):
     args = locals()
     display = Display(**args)
@@ -497,7 +507,8 @@ class Display:
         buffer_shape,
         input_queue,
         output_queue,
-        commands):
+        commands,
+        display_intensity_scaling_queue):
         
         self.display_buffers = display_buffers
         self.buffer_shape = buffer_shape
@@ -505,6 +516,7 @@ class Display:
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.commands = commands
+        self.display_intensity_scaling_queue = display_intensity_scaling_queue
 
         self.set_intensity_scaling('linear', display_min=0, display_max=2**16-1)
 
@@ -649,6 +661,12 @@ class Display:
             self.display_data_8 = np.empty(
                 self.buffer_shape[1:], dtype=np.uint8)
         np.take(self.lut, self.display_data_16, out=self.display_data_8)
+        try:
+            self.display_intensity_scaling_queue.get_nowait()
+        except Queue.Empty:
+            pass
+        self.display_intensity_scaling_queue.put(
+            (self.intensity_scaling, self.display_min, self.display_max))
         self.image = ArrayInterfaceImage(self.display_data_8, allow_copy=False)
         pyglet.gl.glTexParameteri( #Reset to no interpolation
                 pyglet.gl.GL_TEXTURE_2D,

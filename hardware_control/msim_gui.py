@@ -28,6 +28,8 @@ class GUI:
         self.data_pipeline = Image_Data_Pipeline(
             num_buffers=3,
             buffer_shape=(896, 480, 480))
+        self.data_pipeline.set_display_intensity_scaling(
+            'median_filter_autoscale', display_min=0, display_max=0)
         self.data_pipeline.withdraw_display()
         self.camera_settings = {}
         self.camera_roi = (961, 841, 1440, 1320)
@@ -135,12 +137,10 @@ class GUI:
 ##            "<Button-1>", lambda x: self.snap_button.focus_set())
 ##        self.snap_button.pack(side=tk.TOP)
 
-        self.data_pipeline.set_display_intensity_scaling(
-            'median_filter_autoscale', display_min=0, display_max=0)
         self.root.after(50, self.load_config)
         self.root.after(50, self.close_shutters)
-        self.root.after(50, lambda: save_location.get(self))
-        self.root.mainloop()
+        if save_location.get(self):
+            self.root.mainloop()
         self.data_pipeline.close()
         self.dmd.close()
         return None
@@ -407,13 +407,13 @@ class GUI:
         calibration_window = Calibration_Window(self, color)
         return None
     
-    def open_tif_in_imagej(self, filename, force_existence=False, tries_left=5):
+    def open_tif_in_imagej(
+        self, filename, force_existence=True, tries_left=25):
         try:
             imagej_path = self.config.get('ImageJ', 'path')
         except:
             raise UserWarning("ImageJ path is not configured." +
                               "Delete or modify config.ini to fix this.")
-        print repr(filename)
         cmd = """run("TIFF Virtual Stack...", "open=%s");"""%(
             str(filename).replace('\\', '\\\\'))
         if os.path.exists(filename):
@@ -876,11 +876,12 @@ print new_folder
         if os.path.exists(data_folder):
             parent.save_directory = data_folder
             print "Save directory:", parent.save_directory
+            return True
         else:
             print "Data directory response:"
             print result
             parent.root.quit()
-        return None
+        return False
 
 
 if __name__ == '__main__':

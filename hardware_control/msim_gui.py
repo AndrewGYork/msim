@@ -62,13 +62,15 @@ class GUI:
         self.menubar.add_cascade(label="File", menu=self.filemenu)
         self.settingsmenu = tk.Menu(self.menubar, tearoff=0)
         self.settingsmenu.add_command(
-            label="Display", command=self.open_display_settings_window)
-        self.settingsmenu.add_command(
             label="Brightfield mode", command=self.open_brightfield_window)
+        self.settingsmenu.add_command(
+            label="Display", command=self.open_display_settings_window)
         self.settingsmenu.add_command(
             label="Emission filters", command=self.open_filter_window)
         self.settingsmenu.add_command(
             label="SIM pattern", command=self.open_pattern_window)
+        self.settingsmenu.add_command(
+            label="Exposure time", command=self.open_exposure_window)
         self.menubar.add_cascade(label="Settings", menu=self.settingsmenu)
         self.root.config(menu=self.menubar)
 
@@ -80,6 +82,22 @@ class GUI:
         self.sim_patterns = {}
         for c in self.lasers:
             self.sim_patterns[c] = 'illumination_pattern_16x14.raw'
+
+        self.available_sim_exposures = {
+            '4500': {'pt': 4500, 'it': 2200, 'et': 2200},
+            '9000': {'pt': 9000, 'it': 6800, 'et': 6700},
+            '15000': {'pt': 15000, 'it': 12600, 'et': 12600},
+            '25000': {'pt': 25000, 'it': 22600, 'et': 22600},
+            '50000': {'pt': 50000, 'it': 47600, 'et': 47600},
+            '100000': {'pt': 100000, 'it': 97500, 'et': 97500},
+            }
+        self.sim_exposures = {}
+        for c in self.lasers:
+            self.sim_exposures[c] = tk.StringVar()
+            self.sim_exposures[c].set('4500')
+        self.widefield_exposures = {}
+        for c in self.lasers:
+            self.widefield_exposures[c] = 100
 
         self.laser_power = {}
         self.laser_on = {}
@@ -151,12 +169,13 @@ class GUI:
              camera_settings,
              file_name=None,
              display=False,
-             brightfield=False):
+             brightfield=False,
+             ):
         """
         First, we need to check if the DMD settings need to update.
         """
         self.filters.move('f' + self.emission_filters[color].get().split()[-1])
-        print "Snapping", color
+##        print "Snapping", color
         if 'illuminate_time' in dmd_settings:
             dmd_settings['illuminate_time'] = max(
                 15,
@@ -273,7 +292,7 @@ class GUI:
 
     def close_shutters(self):
         if self.shutter_timeout >= 0:
-            print "Shutter time until closed:", self.shutter_timeout - clock()
+##            print "Shutter time until closed:", self.shutter_timeout - clock()
             if self.shutter_timeout < clock():
                 for c in self.lasers:
                     self.shutters.shut(c)
@@ -310,6 +329,15 @@ class GUI:
             self.pattern_window = Pattern_Window(self)
         self.pattern_window.root.lift()
         self.pattern_window.root.focus_force()
+        return None
+
+    def open_exposure_window(self):
+        try:
+            self.exposure_window.root.config()
+        except (AttributeError, tk.TclError):
+            self.exposure_window = Exposure_Window(self)
+        self.exposure_window.root.lift()
+        self.exposure_window.root.focus_force()
         return None
 
     def report_callback_exception(self, *args):
@@ -572,6 +600,46 @@ class Pattern_Window:
         self.parent.load_config()
         return None
 
+class Exposure_Window:
+    def __init__(self, parent):
+        self.parent = parent
+        self.root = tk.Toplevel(parent.root)
+        self.root.wm_title("Exposure time selection")
+        self.root.bind("<Escape>", lambda x: self.root.destroy())
+
+        for c in self.parent.lasers:
+            frame = tk.Frame(self.root)
+            frame.pack(side=tk.TOP, fill=tk.BOTH)
+            a = tk.Label(
+                master=frame, text=c + ' nm laser\nSIM repetition time (us):')
+            a.pack(side=tk.LEFT)
+            a = tk.OptionMenu(
+                frame, self.parent.sim_exposures[c],
+                *sorted(self.parent.available_sim_exposures.keys(),
+                        key=lambda x: int(x)))
+            a.pack(side=tk.LEFT)
+        self.widefield_exposures = {}
+        for c in self.parent.lasers:
+            frame = tk.Frame(self.root)
+            frame.pack(side=tk.TOP, fill=tk.BOTH)
+            a = tk.Label(
+                master=frame,
+                text=c + ' nm laser\nwidefield exposure time (us):')
+            a.pack(side=tk.LEFT)        
+            self.widefield_exposures[c] = Scale_Spinbox(
+                frame, from_=1, to=500, increment=1,
+                initial_value=self.parent.widefield_exposures[c])
+            self.widefield_exposures[c].bind(
+                "<<update>>", lambda x: self.set_widefield_exposures)
+            self.widefield_exposures[c].pack(side=tk.LEFT)
+        return None
+
+    def set_widefield_exposures(self):
+        for c in self.parent.lasers:
+            self.parent.widefield_exposures[c] = (
+                self.widefield_exposures[c].get())
+        return None
+
 class Brightfield_Window:
     def __init__(self, parent):
         self.parent = parent
@@ -629,7 +697,7 @@ class Brightfield_Window:
             'trigger': 'external trigger/software exposure control',
             }
         self.parent.snap(color, dmd_settings, camera_settings, brightfield=True)
-        self.root.after(50, lambda: self.take_brightfield_snap())
+        self.root.after(70, lambda: self.take_brightfield_snap())
         return None
 
     def cancel(self):
@@ -666,6 +734,8 @@ class Calibration_Window:
             label="Emission filters", command=self.parent.open_filter_window)
         self.settingsmenu.add_command(
             label="SIM pattern", command=self.parent.open_pattern_window)
+        self.settingsmenu.add_command(
+            label="Exposure time", command=self.parent.open_exposure_window)
         self.menubar.add_cascade(label="Settings", menu=self.settingsmenu)
         self.root.config(menu=self.menubar)
 
@@ -728,15 +798,18 @@ class Calibration_Window:
     def play_alignment_pattern(self, color):
         if not self.aligning:
             return None
+        exposure = self.parent.available_sim_exposures[
+            self.parent.sim_exposures[color].get()]
         dmd_settings = {
-            'illuminate_time': 2200,
+            'illuminate_time': exposure['it'],
+            'picture_time': exposure['pt'],
             'illumination_filename': os.path.join(
                 os.getcwd(), 'patterns', self.parent.sim_patterns[color]),
             'first_frame': 0,
             'last_frame': self.parent.camera_preframes,
             }
         camera_settings = {
-            'exposure_time_microseconds': 2200,
+            'exposure_time_microseconds': exposure['et'],
             'trigger': 'external trigger/software exposure control',
             }
         self.parent.snap(color, dmd_settings, camera_settings)
@@ -751,13 +824,16 @@ class Calibration_Window:
         a = tk.Label(self.frame, text="Calibration mode.\n\n" +
                      "Acquiring calibration...")
         a.pack(side=tk.TOP)
+        exposure = self.parent.available_sim_exposures[
+            self.parent.sim_exposures[color].get()]
         dmd_settings = {
-            'illuminate_time': 2200,
+            'illuminate_time': exposure['it'],
+            'picture_time': exposure['pt'],
             'illumination_filename': os.path.join(
                 os.getcwd(), 'patterns', self.parent.sim_patterns[color]),
             }
         camera_settings = {
-            'exposure_time_microseconds': 2200,
+            'exposure_time_microseconds': exposure['et'],
             'trigger': 'external trigger/software exposure control',
             }
         file_basename = ('lake' +

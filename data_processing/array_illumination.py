@@ -1598,7 +1598,7 @@ def spot_intensity_vs_scan_position(
 
 def remove_hot_pixels(image, hot_pixels):
     for y, x in hot_pixels:
-        image[x, y] = numpy.median(image[x-1:x+2, y-1:y+2])
+        image[x, y] = numpy.median(image[max(x-1, 0):x+2, max(y-1, 0):y+2])
     return image
 
 def shift_to_central_unit_cell(coordinates, image_shape, lattice_vectors):

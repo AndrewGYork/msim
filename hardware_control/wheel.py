@@ -3,7 +3,7 @@ import serial, time
 class Filter_Wheel:
     def __init__(self, initial_position='f3', wheel_delay=1.8):
         try:
-            self.ser = serial.Serial(7, 115200) #Have to pick the right port
+            self.ser = serial.Serial(11, 115200) #Have to pick the right port
         except:
             raise UserWarning(
                 "Can't open port for the filter wheel.")

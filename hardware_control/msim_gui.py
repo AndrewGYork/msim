@@ -25,9 +25,9 @@ class GUI:
     def __init__(self):
         save_location = Data_Directory_Subprocess()
         logger = mp.log_to_stderr()
-        logger.setLevel(logging.WARNING)
+        logger.setLevel(logging.INFO)
         self.data_pipeline = Image_Data_Pipeline(
-            num_buffers=10,
+            num_buffers=5,
             buffer_shape=(896, 480, 480))
         self.data_pipeline.set_display_intensity_scaling(
             'median_filter_autoscale', display_min=0, display_max=0)
@@ -100,7 +100,8 @@ class GUI:
             self.sim_exposures[c].set('4500')
         self.widefield_exposures = {}
         for c in self.lasers:
-            self.widefield_exposures[c] = 100
+            self.widefield_exposures[c] = tk.StringVar()
+            self.widefield_exposures[c].set('4500')
 
         self.laser_power = {}
         self.laser_on = {}
@@ -233,9 +234,10 @@ class GUI:
         for color in lasers:
             if self.widefield_mode.get():
                 print "Widefield"
-                exposure = {}
-                for key in ('it', 'pt', 'et'):
-                    exposure[key] = self.widefield_exposures[c]
+                time.sleep(0.1)
+                exposure = self.available_sim_exposures[
+                    self.widefield_exposures[color].get()]
+                exposure['it'] = exposure['it'] // 10
                 filename = os.path.join(
                     os.getcwd(), 'patterns', 'widefield_pattern.raw')
             else:
@@ -413,6 +415,10 @@ class GUI:
             to be, but not the right shape. Tell the pipeline to use
             only part of the buffer.
             """
+            print "Setting buffer shape to:"
+            print (self.num_dmd_frames - self.camera_preframes,
+                   num_camera_ud_pix,
+                   num_camera_lr_pix)
             self.data_pipeline.set_buffer_shape(
                 (self.num_dmd_frames - self.camera_preframes,
                  num_camera_ud_pix,
@@ -437,7 +443,8 @@ class GUI:
             self.shutter_timeout = max(
                 self.shutter_timeout,
                 expected_shutter_duration + 0.2 + clock())
-        self.data_pipeline.load_data_buffers(1, file_saving_info=file_info)
+        self.data_pipeline.load_data_buffers(
+            1, file_saving_info=file_info, timeout=1)
         self.dmd.display_pattern(verbose=False)
         self.data_pipeline.camera.commands.send(('get_status', {}))
         self.root.after_idle(self.check_camera_status)
@@ -448,6 +455,7 @@ class GUI:
     def check_camera_status(self):
         if self.data_pipeline.camera.commands.poll():
             camera_status = self.data_pipeline.camera.commands.recv()
+            print "Camera status:", camera_status
             return None
         else:
             self.root.after_idle(self.check_camera_status)
@@ -795,26 +803,18 @@ class Exposure_Window:
                 *sorted(self.parent.available_sim_exposures.keys(),
                         key=lambda x: int(x)))
             a.pack(side=tk.LEFT)
-        self.widefield_exposures = {}
         for c in self.parent.lasers:
             frame = tk.Frame(self.root)
             frame.pack(side=tk.TOP, fill=tk.BOTH)
             a = tk.Label(
                 master=frame,
                 text=c + ' nm laser\nwidefield exposure time (us):')
-            a.pack(side=tk.LEFT)        
-            self.widefield_exposures[c] = Scale_Spinbox(
-                frame, from_=1, to=500, increment=1,
-                initial_value=self.parent.widefield_exposures[c])
-            self.widefield_exposures[c].bind(
-                "<<update>>", lambda x: self.set_widefield_exposures())
-            self.widefield_exposures[c].pack(side=tk.LEFT)
-        return None
-
-    def set_widefield_exposures(self):
-        for c in self.parent.lasers:
-            self.parent.widefield_exposures[c] = (
-                self.widefield_exposures[c].get())
+            a.pack(side=tk.LEFT)
+            a = tk.OptionMenu(
+                frame, self.parent.widefield_exposures[c],
+                *sorted(self.parent.available_sim_exposures.keys(),
+                        key=lambda x: int(x)))
+            a.pack(side=tk.LEFT)
         return None
 
 class Brightfield_Window:

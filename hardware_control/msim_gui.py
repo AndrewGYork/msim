@@ -9,10 +9,11 @@ import multiprocessing as mp
 import Tkinter as tk
 import tkMessageBox
 import tkFileDialog
-##import numpy as np
+import numpy as np
 from image_data_pipeline import Image_Data_Pipeline
 from dmd import ALP
 from shutters import Laser_Shutters
+from stage import Z
 from wheel import Filter_Wheel
 
 if sys.platform == 'win32':
@@ -26,7 +27,7 @@ class GUI:
         logger = mp.log_to_stderr()
         logger.setLevel(logging.WARNING)
         self.data_pipeline = Image_Data_Pipeline(
-            num_buffers=3,
+            num_buffers=10,
             buffer_shape=(896, 480, 480))
         self.data_pipeline.set_display_intensity_scaling(
             'median_filter_autoscale', display_min=0, display_max=0)
@@ -46,6 +47,8 @@ class GUI:
         self.shutters = Laser_Shutters(
             colors=self.lasers, pause_after_open=0.25)
         self.shutter_timeout = -1
+        self.z_stage = Z()
+        self.z_stage.move(0)
         self.filters = Filter_Wheel(initial_position='f3',
                                     wheel_delay=1.8)
         self.root = tk.Tk()
@@ -139,6 +142,7 @@ class GUI:
                            variable=self.widefield_mode)
         a.pack(side=tk.TOP)
         self.num_snaps_saved = 0
+        self.num_stacks_saved = 0
         self.save_snaps = tk.IntVar()
         a = tk.Checkbutton(subsubframe, text='Save snaps',
                            variable=self.save_snaps)
@@ -187,6 +191,7 @@ class GUI:
         subsubframe = tk.Frame(subframe)
         subsubframe.pack(side=tk.LEFT)
         self.interlace_colors = tk.IntVar()
+        self.interlace_colors.set(1)
         a = tk.Checkbutton(subsubframe, text='Interlace colors',
                            variable=self.interlace_colors)
         a.pack(side=tk.TOP)
@@ -205,47 +210,120 @@ class GUI:
         self.dmd.close()
         return None
 
-    def snap_with_gui_settings(self):
+    def snap_with_gui_settings(
+        self, subdirectory=None, display=True, name_postfix=''):
         lasers = [c for c in self.lasers if self.laser_on[c].get() == 1]
         if len(lasers) == 0:
             print "No lasers selected, no snap performed"
             return None
-        if self.widefield_mode.get():
-            print "Widefield"
-        else:
-            print "SIM"
-            for color in lasers:
+        if self.save_snaps.get():
+            if subdirectory is None:
+                """
+                Just a snap, not getting triggered by a stack or a
+                timelapse.
+                """
+                subdirectory = 'Snap_%04i'%(self.num_snaps_saved)
+                if os.path.exists(os.path.join(self.save_directory,
+                                               subdirectory)):
+                    raise UserWarning("Snap directory already exists")
+                else:
+                    os.mkdir(os.path.join(
+                        self.save_directory, subdirectory))
+                self.num_snaps_saved += 1
+        for color in lasers:
+            if self.widefield_mode.get():
+                print "Widefield"
+                exposure = {}
+                for key in ('it', 'pt', 'et'):
+                    exposure[key] = self.widefield_exposures[c]
+                filename = os.path.join(
+                    os.getcwd(), 'patterns', 'widefield_pattern.raw')
+            else:
+                print "SIM"
                 exposure = self.available_sim_exposures[
                     self.sim_exposures[color].get()]
-                dmd_settings = {
-                    'illuminate_time': exposure['it'],
-                    'picture_time': exposure['pt'],
-                    'illumination_filename': os.path.join(
-                        os.getcwd(), 'patterns', self.sim_patterns[color]),
-                    }
-                camera_settings = {
-                    'exposure_time_microseconds': exposure['et'],
-                    'trigger': 'external trigger/software exposure control',
-                    }
-                if self.save_snaps.get():
-                    file_basename = (
-                        'snap' +
-                        '_c%s'%(color) +
-                        '_f%s'%(self.emission_filters[
-                            color].get().split()[-1]) +
-                        '_%04i'%(self.num_snaps_saved) + 
-                        '.tif')
-                    file_name = os.path.join(self.save_directory, file_basename)
-                    display = True
-                    self.num_snaps_saved += 1
-                else:
-                    file_name = None
-                    display = False
-                self.snap(
-                    color, dmd_settings, camera_settings, file_name, display)
+                filename = os.path.join(
+                    os.getcwd(), 'patterns', self.sim_patterns[color])
+            dmd_settings = {
+                'illuminate_time': exposure['it'],
+                'picture_time': exposure['pt'],
+                'illumination_filename': filename,
+                }
+            camera_settings = {
+                'exposure_time_microseconds': exposure['et'],
+                'trigger': 'external trigger/software exposure control',
+                }
+            if self.save_snaps.get():
+                file_basename = (
+                    'snap' +
+                    '_c%s'%(color) +
+                    '_f%s'%(self.emission_filters[
+                        color].get().split()[-1]) +
+                    name_postfix + 
+                    '.tif')
+                file_name = os.path.join(self.save_directory,
+                                         subdirectory,
+                                         file_basename)
+            else:
+                file_name = None
+                display = False
+            self.snap(
+                color, dmd_settings, camera_settings, file_name, display)
         return None
 
-    def z_stack(self):
+    def z_stack(self, subdirectory=None, cancel_box_text='Abort z-stack',):
+        lasers = [c for c in self.lasers if self.laser_on[c].get() == 1]
+        if len(lasers) == 0:
+            print "No lasers selected, no stack performed"
+            return None
+        if not self.interlace_colors.get() and len(lasers) > 1:
+            """Take the stack one color at a time"""
+            for i in lasers:
+                for c in self.lasers:
+                    self.laser_on[c].set(0)
+                self.laser_on[i].set(1)
+                self.z_stack()
+            """Restor the original settings"""
+            for i in lasers:
+                self.laser_on[i].set(1)
+            return None
+        """
+        Ok, now actually take a stack.
+        """
+        if subdirectory is None:
+            """
+            Just a stac, not getting triggered by a timelapse.
+            """
+            subdirectory = 'Stack_%04i'%(self.num_stacks_saved)
+            if os.path.exists(os.path.join(self.save_directory,
+                                           subdirectory)):
+                raise UserWarning("Stack directory already exists")
+            else:
+                os.mkdir(os.path.join(
+                    self.save_directory, subdirectory))
+            self.num_stacks_saved += 1
+        start, stop, step = (self.stack_start.get(),
+                             self.stack_end.get(),
+                             self.stack_step.get())
+        if stop < start:
+            step = -step #'self.stack_step' is always positive
+        save_snaps = self.save_snaps.get()
+        self.save_snaps.set(1)
+        cancel_box = Cancel_Box_Subprocess(
+            title='Acquiring...', text=cancel_box_text)        
+        for i, z in enumerate(np.arange(start, stop, step)):
+            if not cancel_box.ping():
+                print "Acquisition cancelled..."
+                break
+            self.z_stage.move(z * 10) #Stage uses 100 nm units
+            self.snap_with_gui_settings(
+                subdirectory=subdirectory,
+                display=False,
+                name_postfix='_z%04i'%i)
+        if cancel_box.ping():
+            cancel_box.kill()
+        self.z_stage.move(0)
+        self.save_snaps.set(save_snaps)
         return None
 
     def snap(self,
@@ -364,7 +442,7 @@ class GUI:
         self.data_pipeline.camera.commands.send(('get_status', {}))
         self.root.after_idle(self.check_camera_status)
         if display and file_name is not None:
-            self.root.after_idle(lambda: self.open_tif_in_imagej(file_name))
+            self.open_tif_in_imagej(file_name)
         return None
 
     def check_camera_status(self):
@@ -521,21 +599,35 @@ class GUI:
         return None
     
     def open_tif_in_imagej(
-        self, filename, force_existence=True, tries_left=25):
+        self, filename, force_existence=True, tries_left=50):
         try:
             imagej_path = self.config.get('ImageJ', 'path')
         except:
             raise UserWarning("ImageJ path is not configured." +
                               "Delete or modify config.ini to fix this.")
-        cmd = """run("TIFF Virtual Stack...", "open=%s");"""%(
-            str(filename).replace('\\', '\\\\'))
+        """
+        I don't currently have a good way to check if Imagej is open
+        or not. This mostly doesn't matter, but if you're taking
+        2-color snaps, they can land pretty fast on the system and
+        open two imagej copies. Laaame!
+        try:
+            assert self.imagej_subproc.poll()
+        except:
+            #Imagej probably isn't open. Open it, and give it a second.
+            self.imagej_subproc = subprocess.Popen([imagej_path])
+            self.root.after(500, lambda: self.open_tif_in_imagej(
+                filename, force_existence, tries_left))
+            return None
+        """
         if os.path.exists(filename):
+            cmd = """run("TIFF Virtual Stack...", "open=%s");"""%(
+                str(filename).replace('\\', '\\\\'))
             print "Command to ImageJ:\n", repr(cmd)
             subprocess.Popen([imagej_path, "-eval", cmd])
         else:
             print "Waiting for file existence..."
             if force_existence and tries_left > 0:
-                self.root.after(200, lambda: self.open_tif_in_imagej(
+                self.root.after(500, lambda: self.open_tif_in_imagej(
                     filename, force_existence, tries_left=tries_left - 1))
             else:
                 raise UserWarning("Timeout exceeded; file may not exist.")
@@ -1044,6 +1136,34 @@ print new_folder
             parent.root.quit()
         return False
 
+class Cancel_Box_Subprocess:
+    def __init__(self, title='', text='Cancel'):
+        cancel_box_code = """
+import Tkinter as tk
+root = tk.Tk()
+root.title('%s')
+button = tk.Button(master=root,
+                   text='%s',
+                   command=root.destroy)
+button.pack(side=tk.TOP)
+root.mainloop()
+"""%(title, text)
+        self.subprocess = subprocess.Popen(
+            [sys.executable, '-c %s'%cancel_box_code])
+        return None
+
+    def ping(self):
+        response = self.subprocess.poll()
+        if response is None:
+            return True #subproc is still running
+        elif response == 0:
+            return False
+        else:
+            raise UserWarning("Cancel_Box_Subprocess response not understood")
+
+    def kill(self):
+        self.subprocess.terminate()
+        return None
 
 if __name__ == '__main__':
     GUI()

@@ -43,8 +43,8 @@ class GUI:
         self.dmd_settings = {}
         self.dmd_num_frames = 0
         self.lasers = ['561', '488']
-        self.shutters = Laser_Shutters(colors=self.lasers,
-                                       pause_after_open=0.2)
+        self.shutters = Laser_Shutters(
+            colors=self.lasers, pause_after_open=0.25)
         self.shutter_timeout = -1
         self.filters = Filter_Wheel(initial_position='f3',
                                     wheel_delay=1.8)
@@ -130,30 +130,72 @@ class GUI:
                     lambda: self.calibrate(color)))
             self.lake_info[c]['button'].pack(side=tk.LEFT)
 
-##        self.exposure_time_milliseconds = 4.5
-##        subframe = Tk.Frame(frame)
-##        subframe.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
-##        self.galvo_num_sweeps_label = Tk.Label(subframe, text='')
-##        self.galvo_num_sweeps_label.pack(side=Tk.LEFT)
-##        self.num_galvo_sweeps = Scale_Spinbox(
-##            subframe, from_=1, to=50, increment=1, initial_value=2)
-##        self.num_galvo_sweeps.spinbox.config(width=2)
-##        self.num_galvo_sweeps.bind(
-##            "<<update>>", lambda x: self.root.after_idle(
-##                self.set_num_galvo_sweeps))
-##        self.num_galvo_sweeps.pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
-##        self.galvo_num_sweeps_label.config(
-##            text='Exposure:\n%i sweeps\n%0.2f ms each\n%0.2f ms total'%(
-##                self.num_galvo_sweeps.get(), self.galvo_sweep_milliseconds,
-##                self.num_galvo_sweeps.get()* self.galvo_sweep_milliseconds))
-##        a.pack(side=Tk.LEFT)
-            
-##        self.snap_button = tk.Button(
-##            master=frame, text='Snap', bg='gray1', fg='white', font=60,
-##            command=lambda: self.root.after_idle(self.snap))
-##        self.snap_button.bind(
-##            "<Button-1>", lambda x: self.snap_button.focus_set())
-##        self.snap_button.pack(side=tk.TOP)
+        subframe = tk.Frame(frame)
+        subframe.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        subsubframe = tk.Frame(subframe)
+        subsubframe.pack(side=tk.LEFT)
+        self.widefield_mode = tk.IntVar()
+        a = tk.Checkbutton(subsubframe, text='Widefield mode',
+                           variable=self.widefield_mode)
+        a.pack(side=tk.TOP)
+        self.num_snaps_saved = 0
+        self.save_snaps = tk.IntVar()
+        a = tk.Checkbutton(subsubframe, text='Save snaps',
+                           variable=self.save_snaps)
+        a.pack(side=tk.TOP)
+        self.snap_button = tk.Button(
+            master=subframe, text='Snap', bg='gray1', fg='white', font=60,
+            command=lambda: self.root.after_idle(self.snap_with_gui_settings))
+        self.snap_button.bind(
+            "<Button-1>", lambda x: self.snap_button.focus_set())
+        self.snap_button.bind(
+            "<Return>",
+            lambda x: self.root.after_idle(self.snape_with_gui_settings))
+        self.snap_button.pack(side=tk.BOTTOM)
+
+        frame = tk.Frame(self.root, bd=4, relief=tk.SUNKEN)
+        frame.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(frame, text="Z-stack settings:")
+        a.pack(side=tk.TOP)
+        subframe = tk.Frame(frame)
+        subframe.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(master=subframe, text=u'Start:\n (\u03BCm)')
+        a.pack(side=tk.LEFT)
+        self.stack_start = Scale_Spinbox(
+            subframe, from_=-150, to=150, increment=0.05, initial_value=-10)
+        self.stack_start.spinbox.config(width=6)
+        self.stack_start.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
+        subframe = tk.Frame(frame)
+        subframe.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(master=subframe, text=u'End:\n (\u03BCm)')
+        a.pack(side=tk.LEFT)
+        self.stack_end = Scale_Spinbox(
+            subframe, from_=-150, to=150, increment=0.05, initial_value=10)
+        self.stack_end.spinbox.config(width=6)
+        self.stack_end.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
+        subframe = tk.Frame(frame)
+        subframe.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(master=subframe, text=u'Step:\n (\u03BCm)')
+        a.pack(side=tk.LEFT)
+        self.stack_step = Scale_Spinbox(
+            subframe, from_=0.05, to=5, increment=0.05, initial_value=1)
+        self.stack_step.spinbox.config(width=5)
+        self.stack_step.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
+
+        subframe = tk.Frame(frame)
+        subframe.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        subsubframe = tk.Frame(subframe)
+        subsubframe.pack(side=tk.LEFT)
+        self.interlace_colors = tk.IntVar()
+        a = tk.Checkbutton(subsubframe, text='Interlace colors',
+                           variable=self.interlace_colors)
+        a.pack(side=tk.TOP)
+        self.stack_button = tk.Button(
+            master=subframe, text='Acquire Z-stack', bg='gray1', fg='white',
+            command=lambda: self.root.after_idle(self.z_stack))
+        self.stack_button.bind(
+            "<Button-1>", lambda x: self.stack_button.focus_set())
+        self.stack_button.pack(side=tk.TOP)
 
         self.root.after(50, self.load_config)
         self.root.after(50, self.close_shutters)
@@ -161,6 +203,49 @@ class GUI:
             self.root.mainloop()
         self.data_pipeline.close()
         self.dmd.close()
+        return None
+
+    def snap_with_gui_settings(self):
+        lasers = [c for c in self.lasers if self.laser_on[c].get() == 1]
+        if len(lasers) == 0:
+            print "No lasers selected, no snap performed"
+            return None
+        if self.widefield_mode.get():
+            print "Widefield"
+        else:
+            print "SIM"
+            for color in lasers:
+                exposure = self.available_sim_exposures[
+                    self.sim_exposures[color].get()]
+                dmd_settings = {
+                    'illuminate_time': exposure['it'],
+                    'picture_time': exposure['pt'],
+                    'illumination_filename': os.path.join(
+                        os.getcwd(), 'patterns', self.sim_patterns[color]),
+                    }
+                camera_settings = {
+                    'exposure_time_microseconds': exposure['et'],
+                    'trigger': 'external trigger/software exposure control',
+                    }
+                if self.save_snaps.get():
+                    file_basename = (
+                        'snap' +
+                        '_c%s'%(color) +
+                        '_f%s'%(self.emission_filters[
+                            color].get().split()[-1]) +
+                        '_%04i'%(self.num_snaps_saved) + 
+                        '.tif')
+                    file_name = os.path.join(self.save_directory, file_basename)
+                    display = True
+                    self.num_snaps_saved += 1
+                else:
+                    file_name = None
+                    display = False
+                self.snap(
+                    color, dmd_settings, camera_settings, file_name, display)
+        return None
+
+    def z_stack(self):
         return None
 
     def snap(self,
@@ -630,7 +715,7 @@ class Exposure_Window:
                 frame, from_=1, to=500, increment=1,
                 initial_value=self.parent.widefield_exposures[c])
             self.widefield_exposures[c].bind(
-                "<<update>>", lambda x: self.set_widefield_exposures)
+                "<<update>>", lambda x: self.set_widefield_exposures())
             self.widefield_exposures[c].pack(side=tk.LEFT)
         return None
 

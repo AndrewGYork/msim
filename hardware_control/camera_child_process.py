@@ -36,7 +36,7 @@ def camera_child_process(
     camera.get_settings(verbose=False)
     camera.arm(num_buffers=3)
     camera._prepare_to_record_to_memory()
-    preframes = 0
+    preframes = 3
     status = 'Normal'
     while True:
         if commands.poll():
@@ -57,6 +57,8 @@ def camera_child_process(
             elif cmd == 'reset_status':
                 status = 'Normal'
                 commands.send(None)
+            elif cmd == 'get_preframes':
+                commands.send(preframes)
             continue
         try:
             process_me = input_queue.get_nowait()
@@ -78,8 +80,10 @@ def camera_child_process(
                         preframes=preframes,
                         out=a)
                 except pco.TimeoutError:
+                    info('TimeoutError')
                     status = 'TimeoutError'
                 except pco.DMAError:
+                    info('DMAError')
                     status = 'DMAError'
             info("end buffer %i"%(process_me))
             output_queue.put(process_me)

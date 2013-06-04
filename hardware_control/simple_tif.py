@@ -37,7 +37,8 @@ strip_byte_counts = header[118:122].view(numpy.uint32)
 data_format = header[130:134].view(numpy.uint32)
 next_ifd_offset = header[134:138].view(numpy.uint32)
 
-def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
+def array_to_tif(a, outfile='out.tif', slices=None, channels=None,
+                 projected_preview_outfile=None):
     """
     'a' is assumed to be a 3D numpy array of 16-bit unsigned integers.
     I usually use this for stacks of camera data.
@@ -45,6 +46,12 @@ def array_to_tif(a, outfile='out.tif', slices=None, channels=None):
     """
     assert len(a.shape) == 3
     z, y, x = a.shape
+    if projected_preview_outfile is not None:
+        """
+        For viewers that don't like 3D data.
+        """
+        array_to_tif(a.max(axis=0).reshape(1, y, x),
+                     outfile=projected_preview_outfile)
     if slices is not None and channels is not None:
         assert slices * channels == z
         hyperstack = True

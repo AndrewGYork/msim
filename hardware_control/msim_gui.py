@@ -420,13 +420,31 @@ class GUI:
                 print "Acquisition cancelled..."
                 break
             self.z_stage.move(z * 10) #Stage uses 100 nm units
-            for tries in range(3):
+            for tries in range(5):
                 camera_status = self.snap_with_gui_settings(
                     subdirectory=subdirectory,
                     display=False,
                     filename_postfix=filename_postfix + '_z%04i'%i)
                 if camera_status == 'Normal':
                     break
+                else:
+                    """
+                    Not sure what causes these problems. Give it a sec
+                    to cool off I guess?
+                    """
+                    for c in self.lasers:
+                        self.shutters.shut(c)
+                    time.sleep(0.25)
+                    print "Camera status is not good."
+                    print "Reapplying settings."
+                    self.data_pipeline.camera.commands.send((
+                        'apply_settings', self.camera_settings))
+                    try:
+                        trigger, exposure, self.camera_roi = (
+                            self.data_pipeline.camera.commands.recv())
+                    except TypeError:
+                        print "Looks like we're using the dummy camera."
+                    time.sleep(0.25)
             else:
                 raise UserWarning("Snap failed too many times in a row")
             t_points.extend(self.last_timepoints)
@@ -442,8 +460,10 @@ class GUI:
             self.save_index(filenames, lasers, z_points, t_points)
         else:
             self.last_filenames = filenames
+            self.last_previews = previews
             self.last_z_points = z_points
-            self.last_t_points= t_points
+            self.last_t_points = t_points
+            self.last_positions = positions
         if display_previews:
             self.root.after_idle(lambda: self.open_tif_sequence_in_imagej(
                 first_filename=previews[0],
@@ -478,7 +498,7 @@ class GUI:
         self.num_timelapses_saved += 1
         cancel_box = Cancel_Box_Subprocess(
             title='Acquiring...', text="Abort timelapse")
-        filenames, z_points, t_points = [], [], []
+        filenames, previews, z_points, t_points = [], [], [], []
         for t in range(self.timelapse_num_points.get()):
             if t > 0:
                 for i in range(50):
@@ -494,11 +514,19 @@ class GUI:
                          save_index=False,
                          filename_postfix='_t%04i'%(t))
             filenames.extend(self.last_filenames)
+            previews.extend(self.last_previews)
             z_points.extend(self.last_z_points)
             t_points.extend(self.last_t_points)
         if cancel_box.ping():
             cancel_box.kill()
         self.save_index(filenames, lasers, z_points, t_points)
+        self.root.after_idle(lambda: self.open_tif_sequence_in_imagej(
+            first_filename=previews[0],
+            last_filename=previews[-1],
+            channels=len(lasers),
+            slices=len(self.last_positions),
+            frames=self.timelapse_num_points.get(),
+            order='xyztc'))
         return None
 
     def save_index(self, filenames, lasers, z_points, t_points):
@@ -640,7 +668,7 @@ class GUI:
         self.data_pipeline.load_data_buffers(
             1, file_saving_info=file_info, timeout=1)
         self.dmd.display_pattern(verbose=False)
-        self.data_pipeline.camera.commands.send(('get_status', {}))
+##        self.data_pipeline.camera.commands.send(('get_status', {}))
 ##        self.root.after_idle(self.check_camera_status)
         camera_status = self.check_camera_status()
         if display and file_name is not None:
@@ -648,6 +676,7 @@ class GUI:
         return camera_status
 
     def check_camera_status(self):
+        self.data_pipeline.camera.commands.send(('get_status', {}))
         while True:
             if self.data_pipeline.camera.commands.poll():
                 camera_status = self.data_pipeline.camera.commands.recv()

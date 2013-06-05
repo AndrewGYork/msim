@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import shutil
 import logging
 import ConfigParser
 import datetime
@@ -106,6 +107,7 @@ class GUI:
         self.laser_power = {}
         self.laser_on = {}
         self.lake_info = {}
+        self.lake_nagging = True
         frame = tk.Frame(self.root, bd=4, relief=tk.SUNKEN)
         frame.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
         a = tk.Label(frame, text='Snap settings:')
@@ -144,6 +146,7 @@ class GUI:
         a.pack(side=tk.TOP)
         self.num_snaps_saved = 0
         self.num_stacks_saved = 0
+        self.num_timelapses_saved = 0
         self.save_snaps = tk.IntVar()
         a = tk.Checkbutton(subsubframe, text='Save snaps',
                            variable=self.save_snaps)
@@ -167,7 +170,7 @@ class GUI:
         a = tk.Label(master=subframe, text=u'Start:\n (\u03BCm)')
         a.pack(side=tk.LEFT)
         self.stack_start = Scale_Spinbox(
-            subframe, from_=-150, to=150, increment=0.05, initial_value=-10)
+            subframe, from_=-150, to=150, increment=0.05, initial_value=-4)
         self.stack_start.spinbox.config(width=6)
         self.stack_start.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
         subframe = tk.Frame(frame)
@@ -175,7 +178,7 @@ class GUI:
         a = tk.Label(master=subframe, text=u'End:\n (\u03BCm)')
         a.pack(side=tk.LEFT)
         self.stack_end = Scale_Spinbox(
-            subframe, from_=-150, to=150, increment=0.05, initial_value=10)
+            subframe, from_=-150, to=150, increment=0.05, initial_value=4)
         self.stack_end.spinbox.config(width=6)
         self.stack_end.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
         subframe = tk.Frame(frame)
@@ -203,6 +206,43 @@ class GUI:
             "<Button-1>", lambda x: self.stack_button.focus_set())
         self.stack_button.pack(side=tk.TOP)
 
+        frame = tk.Frame(self.root, bd=4, relief=tk.SUNKEN)
+        frame.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(frame, text="Timelapse settings:")
+        a.pack(side=tk.TOP)
+        subframe = tk.Frame(frame)
+        subframe.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(master=subframe, text='Delay (s):')
+        a.pack(side=tk.LEFT)
+        self.timelapse_delay = Scale_Spinbox(
+            subframe, from_=0, to=300, increment=0.1, initial_value=0)
+        self.timelapse_delay.spinbox.config(width=6)
+        self.timelapse_delay.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
+        subframe = tk.Frame(frame)
+        subframe.pack(side=tk.TOP, fill=tk.BOTH)
+        a = tk.Label(master=subframe, text='Timepoints:')
+        a.pack(side=tk.LEFT)
+        self.timelapse_num_points = Scale_Spinbox(
+            subframe, from_=1, to=300, increment=1, initial_value=2)
+        self.timelapse_num_points.spinbox.config(width=6)
+        self.timelapse_num_points.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
+
+        subframe = tk.Frame(frame)
+        subframe.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        subsubframe = tk.Frame(subframe)
+        subsubframe.pack(side=tk.LEFT)
+        self.two_d_timelapse = tk.IntVar()
+        self.two_d_timelapse.set(0)
+        a = tk.Checkbutton(subsubframe, text='2D timelapse',
+                           variable=self.two_d_timelapse)
+        a.pack(side=tk.TOP)
+        self.timelapse_button = tk.Button(
+            master=subframe, text='Acquire timelapse', bg='gray1', fg='white',
+            command=lambda: self.root.after_idle(self.time_lapse))
+        self.timelapse_button.bind(
+            "<Button-1>", lambda x: self.timelapse_button.focus_set())
+        self.timelapse_button.pack(side=tk.TOP)
+
         self.root.after(50, self.load_config)
         self.root.after(50, self.close_shutters)
         if save_location.get(self):
@@ -212,7 +252,7 @@ class GUI:
         return None
 
     def snap_with_gui_settings(
-        self, subdirectory=None, display=True, name_postfix=''):
+        self, subdirectory=None, display=True, filename_postfix=''):
         lasers = [c for c in self.lasers if self.laser_on[c].get() == 1]
         if len(lasers) == 0:
             print "No lasers selected, no snap performed"
@@ -230,10 +270,15 @@ class GUI:
                 else:
                     os.mkdir(os.path.join(
                         self.save_directory, subdirectory))
-                self.num_snaps_saved += 1
+                self.num_snaps_saved += 1 
+                
+        self.last_timepoints = []
+        self.last_filenames = []
+        self.last_file_preview_names = []
         for color in lasers:
             if self.widefield_mode.get():
                 print "Widefield"
+                filename_prefix = 'widefield'
                 time.sleep(0.1)
                 exposure = self.available_sim_exposures[
                     self.widefield_exposures[color].get()]
@@ -242,6 +287,33 @@ class GUI:
                     os.getcwd(), 'patterns', 'widefield_pattern.raw')
             else:
                 print "SIM"
+                """
+                Make sure the lake calibration data is copied into the
+                subdirectory. Nag the user if the calibration's no
+                good.
+                """  
+                if self.save_snaps.get():
+                    if self.lake_info[c]['calibration'] == 'None':
+                        tkMessageBox.showwarning(
+                            "Bad calibration", "No calibration data!")
+                        return None
+                    elif self.lake_info[c]['calibration'] == 'Old':
+                        if self.lake_nagging:
+                            tkMessageBox.showwarning(
+                                "Bad calibration", "Old calibration data!")
+                            self.lake_nagging = False
+                            return None
+                    else:
+                        assert self.lake_info[c]['calibration'] == 'Good'
+                        if os.path.exists(self.lake_info[c]['path']):
+                            shutil.copyfile(
+                                self.lake_info[c]['path'],
+                                os.path.join(self.save_directory,
+                                             subdirectory,
+                                             'lake_%s.tif'%(color)))
+                        else:
+                            raise UserWarning("Calibration file went missing!")
+                filename_prefix = 'msim'
                 exposure = self.available_sim_exposures[
                     self.sim_exposures[color].get()]
                 filename = os.path.join(
@@ -257,24 +329,50 @@ class GUI:
                 }
             if self.save_snaps.get():
                 file_basename = (
-                    'snap' +
+                    filename_prefix +
+                    '_image' +
                     '_c%s'%(color) +
                     '_f%s'%(self.emission_filters[
                         color].get().split()[-1]) +
-                    name_postfix + 
+                    filename_postfix + 
                     '.tif')
-                file_name = os.path.join(self.save_directory,
-                                         subdirectory,
-                                         file_basename)
+                data_directory = os.path.join(
+                    self.save_directory, subdirectory, 'image_data')
+                if not os.path.exists(data_directory):
+                    os.mkdir(data_directory)
+                preview_directory = os.path.join(
+                    self.save_directory, subdirectory, 'image_preview')
+                if not os.path.exists(preview_directory):
+                    os.mkdir(preview_directory)
+                file_name = os.path.join(data_directory, file_basename)
+                file_preview_name = os.path.join(
+                    preview_directory, file_basename)
             else:
                 file_name = None
+                file_preview_name = None
                 display = False
             self.snap(
-                color, dmd_settings, camera_settings, file_name, display)
+                color, dmd_settings, camera_settings,
+                file_name, file_preview_name, display)
+            self.last_timepoints.append(clock())
+            self.last_filenames.append(file_name)
+            self.last_file_preview_names.append(file_preview_name)
         return None
 
-    def z_stack(self, subdirectory=None, cancel_box_text='Abort z-stack',):
+    def z_stack(self, subdirectory=None, cancel_box_text='Abort z-stack',
+                display_previews=True, save_index=True, filename_postfix=''):
         lasers = [c for c in self.lasers if self.laser_on[c].get() == 1]
+        for c in lasers:
+            if self.lake_info[c]['calibration'] == 'None':
+                tkMessageBox.showwarning(
+                    "Bad calibration", "No calibration data!")
+                return None
+            elif self.lake_info[c]['calibration'] == 'Old':
+                if self.lake_nagging:
+                    tkMessageBox.showwarning(
+                        "Old calibration", "Old calibration data!")
+                    self.lake_nagging = False
+                    return None
         if len(lasers) == 0:
             print "No lasers selected, no stack performed"
             return None
@@ -285,7 +383,7 @@ class GUI:
                     self.laser_on[c].set(0)
                 self.laser_on[i].set(1)
                 self.z_stack()
-            """Restor the original settings"""
+            """Restore the original settings"""
             for i in lasers:
                 self.laser_on[i].set(1)
             return None
@@ -294,7 +392,7 @@ class GUI:
         """
         if subdirectory is None:
             """
-            Just a stac, not getting triggered by a timelapse.
+            Just a stack, not getting triggered by a timelapse.
             """
             subdirectory = 'Stack_%04i'%(self.num_stacks_saved)
             if os.path.exists(os.path.join(self.save_directory,
@@ -312,8 +410,10 @@ class GUI:
         save_snaps = self.save_snaps.get()
         self.save_snaps.set(1)
         cancel_box = Cancel_Box_Subprocess(
-            title='Acquiring...', text=cancel_box_text)        
-        for i, z in enumerate(np.arange(start, stop, step)):
+            title='Acquiring...', text=cancel_box_text)
+        filenames, previews, z_points, t_points = [], [], [], []
+        positions = np.arange(start, stop, step)
+        for i, z in enumerate(positions):
             if not cancel_box.ping():
                 print "Acquisition cancelled..."
                 break
@@ -321,11 +421,95 @@ class GUI:
             self.snap_with_gui_settings(
                 subdirectory=subdirectory,
                 display=False,
-                name_postfix='_z%04i'%i)
+                filename_postfix=filename_postfix + '_z%04i'%i)
+            t_points.extend(self.last_timepoints)
+            filenames.extend(self.last_filenames)
+            previews.extend(self.last_file_preview_names)
+            for l in lasers:
+                z_points.append(z)
         if cancel_box.ping():
             cancel_box.kill()
         self.z_stage.move(0)
         self.save_snaps.set(save_snaps)
+        if save_index:
+            self.save_index(filenames, lasers, z_points, t_points)
+        else:
+            self.last_filenames = filenames
+            self.last_z_points = z_points
+            self.last_t_points= t_points
+        if display_previews:
+            self.root.after_idle(lambda: self.open_tif_sequence_in_imagej(
+                first_filename=previews[0],
+                last_filename=previews[-1],
+                channels=len(lasers),
+                slices=len(positions),
+                frames=1,
+                order='xyztc'))
+        return None
+
+    def time_lapse(self):
+        lasers = [c for c in self.lasers if self.laser_on[c].get() == 1]
+        for c in lasers:
+            if self.lake_info[c]['calibration'] == 'None':
+                tkMessageBox.showwarning(
+                    "Bad calibration", "No calibration data!")
+                return None
+            elif self.lake_info[c]['calibration'] == 'Old':
+                if self.lake_nagging:
+                    tkMessageBox.showwarning(
+                        "Old calibration", "Old calibration data!")
+                    self.lake_nagging = False
+                    return None
+        if len(lasers) == 0:
+            print "No lasers selected, no timelapse performed"
+            return None
+        subdirectory = 'Timelapse_%04i'%(self.num_timelapses_saved)
+        if os.path.exists(os.path.join(self.save_directory, subdirectory)):
+            raise UserWarning("Timelapse directory already exists")
+        else:
+            os.mkdir(os.path.join(self.save_directory, subdirectory))
+        self.num_timelapses_saved += 1
+        cancel_box = Cancel_Box_Subprocess(
+            title='Acquiring...', text="Abort timelapse")
+        filenames, z_points, t_points = [], [], []
+        for t in range(self.timelapse_num_points.get()):
+            if t > 0:
+                for i in range(50):
+                    """
+                    Wait in small chunks so cancelling isn't so painful.
+                    """
+                    if not cancel_box.ping():
+                        print "Acquisition cancelled..."
+                        break
+                    time.sleep(self.timelapse_delay.get() * 0.02)
+            self.z_stack(subdirectory=subdirectory,
+                         display_previews=False,
+                         save_index=False,
+                         filename_postfix='_t%04i'%(t))
+            filenames.extend(self.last_filenames)
+            z_points.extend(self.last_z_points)
+            t_points.extend(self.last_t_points)
+        if cancel_box.ping():
+            cancel_box.kill()
+        self.save_index(filenames, lasers, z_points, t_points)
+        return None
+
+    def save_index(self, filenames, lasers, z_points, t_points):
+        index_name = 'index'
+        for c in lasers:
+            index_name += '_' + c
+        index_name += '.txt'
+        index = open(os.path.join(os.path.dirname(filenames[0]),index_name),
+                     'wb')
+        for i, fn in enumerate(filenames):
+            z = z_points[i] * 0.1
+            if z is None:
+                z = 0
+            t = t_points[i] - t_points[0]
+            index.write(os.path.basename(fn) +
+                        ': z= %+0.3f microns'%(z) +
+                        ', t= %0.4f seconds\r\n'%(t))
+        index.close()
         return None
 
     def snap(self,
@@ -333,6 +517,7 @@ class GUI:
              dmd_settings,
              camera_settings,
              file_name=None,
+             file_preview_name=None,
              display=False,
              brightfield=False,
              ):
@@ -431,6 +616,8 @@ class GUI:
             file_info = None
         else:
             file_info = [{'outfile': file_name}]
+            if file_preview_name is not None:
+                file_info[0]['projected_preview_outfile'] = file_preview_name
         for c in self.lasers:
             if c == color:
                 pass
@@ -447,19 +634,27 @@ class GUI:
             1, file_saving_info=file_info, timeout=1)
         self.dmd.display_pattern(verbose=False)
         self.data_pipeline.camera.commands.send(('get_status', {}))
-        self.root.after_idle(self.check_camera_status)
+##        self.root.after_idle(self.check_camera_status)
+        self.check_camera_status()
         if display and file_name is not None:
             self.open_tif_in_imagej(file_name)
         return None
 
     def check_camera_status(self):
-        if self.data_pipeline.camera.commands.poll():
-            camera_status = self.data_pipeline.camera.commands.recv()
-            print "Camera status:", camera_status
-            return None
-        else:
-            self.root.after_idle(self.check_camera_status)
-        return None
+        while True:
+            if self.data_pipeline.camera.commands.poll():
+                camera_status = self.data_pipeline.camera.commands.recv()
+                print "Camera status:", camera_status
+                return None
+            else:
+                time.sleep(0.001)
+##        if self.data_pipeline.camera.commands.poll():
+##            camera_status = self.data_pipeline.camera.commands.recv()
+##            print "Camera status:", camera_status
+##            return None
+##        else:
+##            self.root.after_idle(self.check_camera_status)
+##        return None
 
     def close_shutters(self):
         if self.shutter_timeout >= 0:
@@ -640,6 +835,41 @@ class GUI:
             else:
                 raise UserWarning("Timeout exceeded; file may not exist.")
         return None
+
+    def open_tif_sequence_in_imagej(
+        self, first_filename, last_filename,
+        channels=None, slices=None, frames=None,
+        order='xyczt(default)', force_existence=True, tries_left=50):
+        try:
+            imagej_path = self.config.get('ImageJ', 'path')
+        except:
+            raise UserWarning("ImageJ path is not configured." +
+                              "Delete or modify config.ini to fix this.")
+        if os.path.exists(last_filename):
+            cmd = (
+                'run("Image Sequence...", "open=%s'%(
+                    str(first_filename).replace('\\', '\\\\')) +
+                ' number=99999 starting=1 increment=1' +
+                ' scale=100 file=[] or=[] sort");')
+            if (channels is not None and
+                slices is not None and
+                frames is not None):
+                cmd = (cmd +
+                       ' run("Stack to Hyperstack...", "order=%s'%(order) +
+                       ' channels=%i slices=%i frames=%i display=Grayscale");'%(
+                           channels, slices, frames))
+            print "Command to ImageJ:\n", repr(cmd)
+            subprocess.Popen([imagej_path, "-eval", cmd])
+        else:
+            print "Waiting for file existence..."
+            if force_existence and tries_left > 0:
+                self.root.after(500, lambda: self.open_tif_sequence_in_imagej(
+                    first_filename, last_filename,
+                    channels, slices, frames,
+                    order, force_existence, tries_left=tries_left - 1))
+            else:
+                raise UserWarning("Timeout exceeded; file may not exist.")
+        return None
     
 class Display_Settings_Window:
     def __init__(self, parent):
@@ -729,7 +959,10 @@ class Filter_Window:
         self.root.wm_title("Emission filter settings")
         self.root.bind("<Escape>", lambda x: self.root.destroy())
 
-        a = tk.Label(self.root, text="Emission filter settings:")
+        a = tk.Label(
+            self.root, text="Emission filter settings:\n\n" +
+            "Be careful!\n" +
+            "Changing filter settings might require recalibration\n\n")
         a.pack(side=tk.TOP)
         for c in self.parent.lasers:
             frame = tk.Frame(self.root)
@@ -751,7 +984,6 @@ class Pattern_Window:
         available_patterns = {
             120: 'illumination_pattern_12x10.raw',
             224: 'illumination_pattern_16x14.raw',
-            288: 'illumination_pattern_18x16.raw',
             340: 'illumination_pattern_20x17.raw',
             504: 'illumination_pattern_24x21.raw',
             672: 'illumination_pattern_28x24.raw',

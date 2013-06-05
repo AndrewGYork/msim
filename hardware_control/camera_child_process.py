@@ -79,12 +79,14 @@ def camera_child_process(
                         num_images=a.shape[0] + preframes,
                         preframes=preframes,
                         out=a)
-                except pco.TimeoutError:
-                    info('TimeoutError')
+                except pco.TimeoutError as e:
+                    info('TimeoutError, %i acquired'%(e.num_acquired))
                     status = 'TimeoutError'
                 except pco.DMAError:
                     info('DMAError')
                     status = 'DMAError'
+                else:
+                    status = 'Normal'
             info("end buffer %i"%(process_me))
             output_queue.put(process_me)
     camera.close()

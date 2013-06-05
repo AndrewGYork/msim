@@ -195,7 +195,7 @@ class GUI:
         subsubframe = tk.Frame(subframe)
         subsubframe.pack(side=tk.LEFT)
         self.interlace_colors = tk.IntVar()
-        self.interlace_colors.set(1)
+        self.interlace_colors.set(0)
         a = tk.Checkbutton(subsubframe, text='Interlace colors',
                            variable=self.interlace_colors)
         a.pack(side=tk.TOP)
@@ -351,16 +351,18 @@ class GUI:
                 file_name = None
                 file_preview_name = None
                 display = False
-            self.snap(
+            camera_status = self.snap(
                 color, dmd_settings, camera_settings,
                 file_name, file_preview_name, display)
             self.last_timepoints.append(clock())
             self.last_filenames.append(file_name)
             self.last_file_preview_names.append(file_preview_name)
-        return None
+        return camera_status
 
     def z_stack(self, subdirectory=None, cancel_box_text='Abort z-stack',
                 display_previews=True, save_index=True, filename_postfix=''):
+        args = locals()
+        args.pop('self')
         lasers = [c for c in self.lasers if self.laser_on[c].get() == 1]
         for c in lasers:
             if self.lake_info[c]['calibration'] == 'None':
@@ -382,7 +384,7 @@ class GUI:
                 for c in self.lasers:
                     self.laser_on[c].set(0)
                 self.laser_on[i].set(1)
-                self.z_stack()
+                self.z_stack(**args)
             """Restore the original settings"""
             for i in lasers:
                 self.laser_on[i].set(1)
@@ -418,10 +420,15 @@ class GUI:
                 print "Acquisition cancelled..."
                 break
             self.z_stage.move(z * 10) #Stage uses 100 nm units
-            self.snap_with_gui_settings(
-                subdirectory=subdirectory,
-                display=False,
-                filename_postfix=filename_postfix + '_z%04i'%i)
+            for tries in range(3):
+                camera_status = self.snap_with_gui_settings(
+                    subdirectory=subdirectory,
+                    display=False,
+                    filename_postfix=filename_postfix + '_z%04i'%i)
+                if camera_status == 'Normal':
+                    break
+            else:
+                raise UserWarning("Snap failed too many times in a row")
             t_points.extend(self.last_timepoints)
             filenames.extend(self.last_filenames)
             previews.extend(self.last_file_preview_names)
@@ -635,17 +642,17 @@ class GUI:
         self.dmd.display_pattern(verbose=False)
         self.data_pipeline.camera.commands.send(('get_status', {}))
 ##        self.root.after_idle(self.check_camera_status)
-        self.check_camera_status()
+        camera_status = self.check_camera_status()
         if display and file_name is not None:
             self.open_tif_in_imagej(file_name)
-        return None
+        return camera_status
 
     def check_camera_status(self):
         while True:
             if self.data_pipeline.camera.commands.poll():
                 camera_status = self.data_pipeline.camera.commands.recv()
                 print "Camera status:", camera_status
-                return None
+                return camera_status
             else:
                 time.sleep(0.001)
 ##        if self.data_pipeline.camera.commands.poll():

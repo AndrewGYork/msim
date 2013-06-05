@@ -158,7 +158,7 @@ class GUI:
             "<Button-1>", lambda x: self.snap_button.focus_set())
         self.snap_button.bind(
             "<Return>",
-            lambda x: self.root.after_idle(self.snape_with_gui_settings))
+            lambda x: self.root.after_idle(self.snap_with_gui_settings))
         self.snap_button.pack(side=tk.BOTTOM)
 
         frame = tk.Frame(self.root, bd=4, relief=tk.SUNKEN)
@@ -278,11 +278,17 @@ class GUI:
         for color in lasers:
             if self.widefield_mode.get():
                 print "Widefield"
+                """
+                FIXME: Timing in global shutter mode is all fucked up.
+                I'm not doing my widefield timing in a way that makes
+                any sense, and I need to get in here with an
+                oscilloscope to really get it right.
+                """
                 filename_prefix = 'widefield'
                 time.sleep(0.1)
-                exposure = self.available_sim_exposures[
-                    self.widefield_exposures[color].get()]
-                exposure['it'] = exposure['it'] // 10
+                exposure = dict(self.available_sim_exposures[
+                    self.widefield_exposures[color].get()])
+                exposure['it'] = exposure['it'] // 40
                 filename = os.path.join(
                     os.getcwd(), 'patterns', 'widefield_pattern.raw')
             else:
@@ -314,8 +320,8 @@ class GUI:
                         else:
                             raise UserWarning("Calibration file went missing!")
                 filename_prefix = 'msim'
-                exposure = self.available_sim_exposures[
-                    self.sim_exposures[color].get()]
+                exposure = dict(self.available_sim_exposures[
+                    self.sim_exposures[color].get()])
                 filename = os.path.join(
                     os.getcwd(), 'patterns', self.sim_patterns[color])
             dmd_settings = {
@@ -556,6 +562,11 @@ class GUI:
              display=False,
              brightfield=False,
              ):
+##        args = locals()
+##        args.pop('self')
+##        for k in sorted(args.keys()):
+##            print k, ':'
+##            print '   ', args[k]
         """
         First, we need to check if the DMD settings need to update.
         """

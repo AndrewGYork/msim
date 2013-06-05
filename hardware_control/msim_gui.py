@@ -513,7 +513,7 @@ class GUI:
                     """
                     if not cancel_box.ping():
                         print "Acquisition cancelled..."
-                        break
+                        return None
                     time.sleep(self.timelapse_delay.get() * 0.02)
             self.z_stack(subdirectory=subdirectory,
                          display_previews=False,

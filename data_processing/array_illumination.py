@@ -730,9 +730,11 @@ def load_image_data(filename, xPix=512, yPix=512, zPix=201, preframes=0):
             raise UserWarning("MSIM data must be 16-bit unsigned integers.")
     else:
         offset = 0
+    bytes_per_frame = 2*xPix*yPix
+    offset += preframes * bytes_per_frame
     return numpy.memmap(#FIRST dimension is image number
-        filename, dtype=numpy.uint16, mode='r'
-        ).reshape(zPix+preframes, xPix, yPix)[preframes:, :, :]
+        filename, dtype=numpy.uint16, mode='r', offset=offset,
+        shape=(zPix, xPix, yPix))
 
 def load_image_slice(filename, xPix, yPix, preframes=0, which_slice=0):
     if os.path.splitext(filename)[1] in ('.tif', '.tiff'):

@@ -10,6 +10,10 @@ except ImportError:
         "We need Delaunay triangulation to correct for scan grid\n" +
         " nonuniformity, but you don't have a new enough version of scipy.\n" +
         "Upgrade!")
+try:
+    import simple_tif.py
+except ImportError:
+    print "simple_tif.py import failed. You won't be able to process TIF files."
 
 def get_lattice_vectors(
     filename_list=['Sample.raw'],
@@ -701,22 +705,58 @@ def enderlein_image_subprocess(
     return images
 
 ##def load_image_data(filename, xPix=512, yPix=512, zPix=201):
-##    """Load the 16-bit raw data from the Visitech Infinity"""
+##    """Load the 16-bit raw data from the MSIM"""
 ##    return numpy.memmap(
 ##        filename, dtype=numpy.uint16, mode='r'
 ##        ).reshape(zPix, xPix, yPix) #FIRST dimension is image number
 
 def load_image_data(filename, xPix=512, yPix=512, zPix=201, preframes=0):
-    """Load the 16-bit raw data from the Visitech Infinity"""
+    """Load the 16-bit raw data from the MSIM"""
+    if os.path.splitext(filename)[1] in ('.tif', '.tiff'):
+        """
+        Ignore the dimension parameters, and use the TIF metadata.
+        """
+        try:
+            import simple_tif
+        except ImportError:
+            raise UserWarning("Failed to import simple_tif.py.\n" +
+                              "You need simple_tif.py to process TIF files.")
+        info = simple_tif.get_tif_info(filename)
+        xPix = info['length']
+        yPix = info['width']
+        zPix = info['num_slices']
+        offset = info['offset']
+        if info['dtype'] != numpy.uint16:
+            raise UserWarning("MSIM data must be 16-bit unsigned integers.")
+    else:
+        offset = 0
     return numpy.memmap(#FIRST dimension is image number
         filename, dtype=numpy.uint16, mode='r'
         ).reshape(zPix+preframes, xPix, yPix)[preframes:, :, :]
 
 def load_image_slice(filename, xPix, yPix, preframes=0, which_slice=0):
-    """Load a frame of the 16-bit raw data from the Visitech Infinity"""
+    if os.path.splitext(filename)[1] in ('.tif', '.tiff'):
+        """
+        Ignore the dimension parameters, and use the TIF metadata.
+        """
+        try:
+            import simple_tif
+        except ImportError:
+            raise UserWarning("Failed to import simple_tif.py.\n" +
+                              "You need simple_tif.py to process TIF files.")
+        info = simple_tif.get_tif_info(filename)
+        xPix = info['width']
+        yPix = info['length']
+        offset = info['offset']
+        if info['dtype'] != numpy.uint16:
+            raise UserWarning("MSIM data must be 16-bit unsigned integers.")
+    else:
+        offset = 0
+    """Load a frame of the 16-bit raw data from the MSIM"""
     bytes_per_pixel = 2
     data_file = open(filename, 'rb')
-    data_file.seek((which_slice + preframes) * xPix*yPix*bytes_per_pixel)
+    data_file.seek(
+        offset + (which_slice + preframes) * xPix*yPix*bytes_per_pixel)
     try:
         return numpy.fromfile(
             data_file, dtype=numpy.uint16, count=xPix*yPix
@@ -1302,16 +1342,16 @@ def get_precise_shift_vector(
 
 def get_shift(shift_vector, frame_number):
     if isinstance(shift_vector, list):
-        """This means we have an 'arbitrary' scan-type shift vector"""
+        """This means we have an 'arbitrary' scan-type shift vector, like the 2D galvo-based MSIM"""
         return shift_vector[frame_number]
     elif isinstance(shift_vector, dict): 
-        """This means we have a 2D shift vector"""
+        """This means we have a 2D shift vector, like the DMD-based MSIM"""
         fast_steps = frame_number % shift_vector['scan_dimensions'][0]
         slow_steps = frame_number // shift_vector['scan_dimensions'][0]
         return (shift_vector['fast_axis'] * fast_steps +
                 shift_vector['slow_axis'] * slow_steps)
     else:
-        """This means we have a 1D shift vector, like the Visitech Infinity"""
+        """This means we have a 1D shift vector, like the galvo-based MSIM"""
         return frame_number * shift_vector
 
 def show_lattice_overlay(
@@ -1725,7 +1765,7 @@ def join_enderlein_images(
 
 def get_data_locations():
     """Assumes that hot_pixels.txt and background.raw are in the same
-    directory ast array_illumination.py"""
+    directory as array_illumination.py"""
     import Tkinter, tkFileDialog, tkSimpleDialog, glob, array_illumination
 
     module_dir = os.path.dirname(array_illumination.__file__)
@@ -1735,8 +1775,8 @@ def get_data_locations():
     tkroot.withdraw()
     data_filename = str(os.path.normpath(tkFileDialog.askopenfilename(
         title=("Select one of your raw SIM data files"),
-        filetypes=[('Raw binary', '.raw')],
-        defaultextension='.raw',
+        filetypes=[('Raw binary', '.raw'), ('TIF', '.tif'), ('TIF', '.tiff')],
+        defaultextension='.tif',
         initialdir=os.getcwd()
         ))) #Careful about Unicode here!
     data_dir = os.path.dirname(data_filename)
@@ -1746,19 +1786,25 @@ def get_data_locations():
             title='Filename pattern',
             prompt=("Use '?' as a wildcard\n\n" +
                     "For example:\n" +
-                    "  image_????.raw\n" +
+                    "  image_????.tif\n" +
                     "would match:\n" +
-                    "  image_0001.raw\n" +
-                    "  image_0002.raw\n" +
+                    "  image_0001.tif\n" +
+                    "  image_0002.tif\n" +
                     "  etc...\n" +
                     "but would not match:\n" +
-                    "   image_001.raw"),
+                    "   image_001.tif"),
             initialvalue=os.path.split(data_filename)[1])
         data_filenames_list = sorted(glob.glob(
             os.path.join(data_dir, wildcard_data_filename)))
+        first_extension = os.path.splitext(data_filenames_list[0])[1]
         print "Data filenames:"
         for f in data_filenames_list:
             print '.  ' + f
+        if not all([os.path.splitext(f)[1] == first_extension
+                for f in data_filenames_list]):
+            print "Multiple file extensions chosen, but not supported."
+            print "Choose your wildcards so you only get one filetype."
+            continue
         response = raw_input("Are those the files you want to process? [y]/n:")
         if response == 'n':
             continue
@@ -1767,10 +1813,10 @@ def get_data_locations():
 
     lake_filename = str(os.path.normpath(tkFileDialog.askopenfilename(
         title=("Select your lake calibration raw data file"),
-        filetypes=[('Raw binary', '.raw')],
-        defaultextension='.raw',
+        filetypes=[('Raw binary', '.raw'), ('TIF', '.tif'), ('TIF', '.tiff')],
+        defaultextension='.tif',
         initialdir=os.path.join(data_dir, os.pardir),
-        initialfile='lake.raw'
+        initialfile='lake.tif'
         ))) #Careful about Unicode here!
 
     tkroot.destroy()

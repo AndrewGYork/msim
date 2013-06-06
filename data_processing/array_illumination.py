@@ -1775,7 +1775,9 @@ def get_data_locations():
     tkroot.withdraw()
     data_filename = str(os.path.normpath(tkFileDialog.askopenfilename(
         title=("Select one of your raw SIM data files"),
-        filetypes=[('Raw binary', '.raw'), ('TIF', '.tif'), ('TIF', '.tiff')],
+        filetypes=[('MSIM data', '.tif'),
+                   ('MSIM data', '.tiff'),
+                   ('MSIM data', '.raw')],
         defaultextension='.tif',
         initialdir=os.getcwd()
         ))) #Careful about Unicode here!
@@ -1813,7 +1815,9 @@ def get_data_locations():
 
     lake_filename = str(os.path.normpath(tkFileDialog.askopenfilename(
         title=("Select your lake calibration raw data file"),
-        filetypes=[('Raw binary', '.raw'), ('TIF', '.tif'), ('TIF', '.tiff')],
+        filetypes=[('MSIM data', '.tif'),
+                   ('MSIM data', '.tiff'),
+                   ('MSIM data', '.raw')],
         defaultextension='.tif',
         initialdir=os.path.join(data_dir, os.pardir),
         initialfile='lake.tif'

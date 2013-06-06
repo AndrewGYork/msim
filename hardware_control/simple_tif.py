@@ -1,3 +1,4 @@
+import mmap
 import numpy
 """
 I often save camera data as raw binary, since it's so easy. However,
@@ -348,9 +349,9 @@ def tif_to_array(filename='out.tif', verbose=False, return_info=False):
     TIFs written by 'array_to_tif' in this module. Writing a general
     TIF reader is much harder.
     """
-    f = open(filename, 'rb')
-    t = f.read()
-    f.close()
+    with open(filename, 'rb') as f:
+        t = f.read()
+        f.close()
     strip_offsets = []
     strip_byte_counts = []
     assert t[0:4] == 'II*\x00' #Little Endian
@@ -394,6 +395,60 @@ def tif_to_array(filename='out.tif', verbose=False, return_info=False):
     else:
         return data.reshape(num_slices, ifd_info['length'], ifd_info['width'])
 
+def get_tif_info(
+    filename='out.tif', verbose=False, return_ifd_info=False):
+    """
+    Often, the tif data is stored as a single block, with a header,
+    and all you really want to know is, where does the block start,
+    and what is it shaped like?
+    """
+    with open(filename, 'rb') as f:
+        t = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        strip_offsets = []
+        strip_byte_counts = []
+        assert t[0:4] == 'II*\x00' #Little Endian
+        ifd_offset = bytes_to_int(t[4:8])
+        while True:
+            num_tags, ifd_info = parse_tags(t, ifd_offset, verbose=verbose)
+            strip_offsets.append(ifd_info['strip_offset'])
+            strip_byte_counts.append(ifd_info['strip_byte_count'])
+            ifd_offset = bytes_to_int(t[ifd_offset + ifd_info['num_tags']*12 + 2:
+                                        ifd_offset + ifd_info['num_tags']*12 + 6])
+            if verbose:
+                print "Next IFD offset:",  ifd_offset #Pointer to next IFD
+                print
+            if ifd_offset == 0:
+                break
+    gaps = numpy.diff(strip_offsets) - numpy.array(strip_byte_counts)[:-1]
+    if len(gaps) == 0: #Only one slice
+        continuous = True
+    elif gaps.max() == 0 and gaps.min() == 0:
+        continuous = True
+    if continuous:
+        """ The data is stored in one continuous array, in the order
+        we expect. Load it like a raw binary file. """
+        data_length = numpy.sum(strip_byte_counts)
+        data_format = ifd_info['format']
+        data_bitdepth = ifd_info['bit_depth']
+        data_type = data_format + str(data_bitdepth)
+        try:
+            data_type = getattr(numpy, data_type)
+        except AttributeError:
+            raise UserWarning("Unsupported data format: " + data_type)
+    else:
+        raise UserWarning("The data is not written as one continuous block")
+    num_slices = data_length*8 // (data_bitdepth *
+                                   ifd_info['length'] *
+                                   ifd_info['width'])
+    info = {'offset': strip_offsets[0],
+            'num_slices': num_slices,
+            'length': ifd_info['length'],
+            'width': ifd_info['width'],
+            'dtype': data_type}
+    if return_ifd_info:
+        info['ifd_info'] = ifd_info
+    return info
+
 if __name__ == '__main__':
     a = numpy.arange(7*800*900, dtype=numpy.float64).reshape(7, 800, 900)
     array_to_tif(a)
@@ -411,5 +466,25 @@ if __name__ == '__main__':
     print info
     assert a[3, 5, 19] == b[3, 5, 19]
     print "Biggest difference:", abs(a - b).max()
+    print
 
-
+    a = numpy.arange(7*800*900, dtype=numpy.float64).reshape(7, 800, 900)
+    array_to_tif(a)
+##    parse_tif()
+    info = get_tif_info(verbose=False)
+    print info
+    print "Offset:", info['offset']
+    print "Data type:", info['dtype']
+    print "Num slices:", info['num_slices']
+    print "Length:", info['length']
+    print "Width:", info['width']
+    info = get_tif_info(verbose=False, return_ifd_info=True)
+    print "IFD info:"
+    print info['ifd_info']
+    b = numpy.memmap(
+        'out.tif',
+        dtype=info['dtype'],
+        offset=info['offset'],
+        mode='r',
+        shape=(info['num_slices'], info['length'], info['width']))
+    assert a[3, 5, 19] == b[3, 5, 19]

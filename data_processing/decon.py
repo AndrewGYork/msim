@@ -657,5 +657,5 @@ if __name__ == '__main__':
 ##
 ##    richardson_lucy_deconvolution(image_data='200nm_steps_cropped.raw')
 ##
-    richardson_lucy_deconvolution()
+    richardson_lucy_deconvolution(truncate_negative_values=True)
  

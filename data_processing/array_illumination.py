@@ -1050,9 +1050,14 @@ def get_precise_basis(coords, basis_vectors, fft_abs, tolerance, verbose=False):
                 dif = numpy.sqrt(((lat - c)**2).sum())
                 if dif < tolerance:
                     p = c + center_pix
-                    true_max = c + simple_max_finder(
+                    correction = simple_max_finder(
                         fft_abs[p[0] - 1:p[0] + 2,
                                 p[1] - 1:p[1] + 2], show_plots=False)
+                    true_max = c + correction
+                    if abs(correction).max() > 1:
+                        if verbose:
+                            print "Correction is too large. Skipping."
+                        continue
                     if verbose:
                         print "Found lattice point:", c
                         print "Estimated position:", true_max
@@ -1143,6 +1148,8 @@ def simple_max_finder(a, show_plots=True):
         true_max.append(-myFit[1]/(2.0*myFit[2]))
     true_max = numpy.array(true_max)
     if show_plots:
+        print "Data"
+        print a
         print "Correction:", true_max
         fig = pylab.figure()
         pylab.subplot(1, 3, 1)

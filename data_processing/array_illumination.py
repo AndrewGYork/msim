@@ -11,9 +11,10 @@ except ImportError:
         " nonuniformity, but you don't have a new enough version of scipy.\n" +
         "Upgrade!")
 try:
-    import simple_tif.py
+    import simple_tif
 except ImportError:
-    print "simple_tif.py import failed. You won't be able to process TIF files."
+    raise UserWarning("simple_tif.py import failed. " +
+                      "Go get it from the MSIM website.")
 
 def get_lattice_vectors(
     filename_list=['Sample.raw'],
@@ -716,11 +717,6 @@ def load_image_data(filename, xPix=512, yPix=512, zPix=201, preframes=0):
         """
         Ignore the dimension parameters, and use the TIF metadata.
         """
-        try:
-            import simple_tif
-        except ImportError:
-            raise UserWarning("Failed to import simple_tif.py.\n" +
-                              "You need simple_tif.py to process TIF files.")
         info = simple_tif.get_tif_info(filename)
         xPix = info['length']
         yPix = info['width']
@@ -741,11 +737,6 @@ def load_image_slice(filename, xPix, yPix, preframes=0, which_slice=0):
         """
         Ignore the dimension parameters, and use the TIF metadata.
         """
-        try:
-            import simple_tif
-        except ImportError:
-            raise UserWarning("Failed to import simple_tif.py.\n" +
-                              "You need simple_tif.py to process TIF files.")
         info = simple_tif.get_tif_info(filename)
         xPix = info['width']
         yPix = info['length']
@@ -1704,8 +1695,8 @@ def join_enderlein_images(
     new_grid_xrange, new_grid_yrange,
     join_widefield_images=True
     ):
-    if len(data_filenames_list) < 2:
-        print "Less than two files to join. Skipping..."
+    if len(data_filenames_list) < 1:
+        print "No files to join. Skipping..."
         return None
     print "Joining enderlein and widefield images into stack..."
     enderlein_stack = numpy.zeros(
@@ -1746,8 +1737,14 @@ def join_enderlein_images(
         '0123456789')
     print "\nStack basename:", stack_basename
     enderlein_stack.tofile(stack_basename + '_enderlein_stack.raw')
+    simple_tif.array_to_tif(
+        enderlein_stack.astype(numpy.float32),
+        outfile=stack_basename + '_enderlein_stack.tif')
     if join_widefield_images:
         widefield_stack.tofile(stack_basename + '_widefield_stack.raw')
+        simple_tif.array_to_tif(
+            widefield_stack.astype(numpy.float32),
+            outfile=stack_basename + '_widefield_stack.tif')
         w_notes = open(stack_basename + '_widefield_stack.txt', 'wb')
         w_notes.write("Left/right: %i pixels\r\n"%(widefield_stack.shape[2]))
         w_notes.write("Up/down: %i pixels\r\n"%(widefield_stack.shape[1]))

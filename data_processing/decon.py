@@ -23,7 +23,8 @@ def richardson_lucy_deconvolution(
     verbose=True,
     output_name=None,
     tk_master=None,
-    which_channel = 'all'
+    which_channel = 'all',
+    truncate_negative_values=False,
     ):
     """Deconvolve a 2D or 3D image using the Richardson-Lucy algorithm
     from an image and a point-spread funciton (PSF)
@@ -59,8 +60,13 @@ def richardson_lucy_deconvolution(
         return None
     else:
         if image_data.min() < 0:
-            raise UserWarning("Image data has negative elements!\n" + 
-                "This violates the assumptions of Richardson-Lucy deconvolution.")
+            if truncate_negative_values:
+                image_data[image_data < 0] = 0
+            else:
+                raise UserWarning(
+                    "Image data has negative elements!\n" +
+                    "This violates the assumptions of Richardson-Lucy" +
+                    " deconvolution.")
         image_data = 1e-12 + image_data.astype(numpy.float64)
     output_basename, output_extension = os.path.splitext(output_name)
     estimate_name = output_basename + '_estimate' + output_extension

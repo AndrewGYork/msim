@@ -10,7 +10,7 @@ error, read NIDAQmx.h to decypher it."""
 class DAQ:
     def __init__(
         self, voltage={0:(0, 0)}, rate=500, repetitions=1,
-        board_name='cDAQ1Mod1', voltage_limits=None, num_channels=4):
+        board_name='cDAQ1Mod1', voltage_limits=None, num_channels=7):
         """'voltage' should be a dict of numpy arrays of
         floating-point numbers. The keys of 'voltage' are integers,
         0-3. Each element of 'voltage' should start and end near zero.
@@ -37,6 +37,9 @@ class DAQ:
 
     def set_voltage_and_timing(
         self, voltage, rate, repetitions=1, voltage_limits=None):
+        if rate >= 25000:
+            raise UserWarning(
+                "The NI 9264 analog out card can't go faster than 25 kS/s")
         if voltage_limits == None: #Use +/-10 V as the default
             voltage_limits = {
                 0: 10,
@@ -44,7 +47,8 @@ class DAQ:
                 2: 10,
                 3: 10,
                 4: 10,
-                5: 10,}
+                5: 10,
+                6: 10,}
         num_points = -1
         for k in range(self.num_channels):
             if k in voltage:
@@ -104,7 +108,7 @@ class DAQ:
         self._unplayed_voltages = True
         return None
 
-    def scan(self, background=False, timeout=60.0, verbose=True):
+    def scan(self, background=False, timeout=120.0, verbose=True):
         if self._unwritten_voltages:
             self.write_voltage()
         DAQmxErrChk(api.DAQmxStartTask(self._taskHandle))

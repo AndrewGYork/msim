@@ -57,7 +57,7 @@ class Image_Data_Pipeline:
                                 for b in range(2)]
 
         """
-        Lauch the child processes that make up the pipeline
+        Launch the child processes that make up the pipeline
         """
         if camera_child_process is None:
             print "Couldn't load camera_child_process.py."

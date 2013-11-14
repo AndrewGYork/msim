@@ -90,7 +90,11 @@ class Image_Data_Pipeline:
         return None
     
     def load_data_buffers(
-        self, N, timeout=0, file_saving_info=None, collect_buffers=True):
+        self, N, file_saving_info=None, collect_buffers=True, timeout=0):
+        """
+        'file_saving_info' is None, or a list of dicts. Each dict is a
+        set of arguments to simple_tif.array_to_tif().
+        """
         if file_saving_info is not None:
             if len(file_saving_info) != N:
                 raise UserWarning(
@@ -109,30 +113,29 @@ class Image_Data_Pipeline:
                     break
                 except IndexError:
                     if collect_buffers:
+                        if tries > 0:
+                            time.sleep(timeout * 0.1)                            
                         self.collect_data_buffers()
-                    time.sleep(timeout * 0.1)
             else:
                 raise UserWarning("Timeout exceeded, no buffer available")
             """
             Load the buffer into the queue, along with file saving
             info if appropriate
             """
+            permission_slip = {'which_buffer': idle_buffer}
             if file_saving_info is not None:
-                args = file_saving_info.pop(0)
-                args['buffer_number'] = idle_buffer
-                self.file_saving.commands.send(('file_info', args))
-            self.camera.input_queue.put(idle_buffer)
+                permission_slip['file_info'] = file_saving_info.pop(0)
+            self.camera.input_queue.put(permission_slip)
         return None
 
     def collect_data_buffers(self):
         while True:
             try:
-                self.idle_data_buffers.append(
-                    self.file_saving.output_queue.get_nowait())
+                strip_me = self.file_saving.output_queue.get_nowait()
             except Queue.Empty:
                 break
-            else:
-                info("Buffer %i idle"%(self.idle_data_buffers[-1]))
+            self.idle_data_buffers.append(strip_me['which_buffer'])
+            info("Buffer %i idle"%(self.idle_data_buffers[-1]))
         return None
     
     def set_buffer_shape(self, buffer_shape):
@@ -243,14 +246,15 @@ if camera_child_process is None:
                     buffer_size = np.prod(buffer_shape)
                 continue
             try:
-                process_me = input_queue.get_nowait()
+                permission_slip = input_queue.get_nowait()
             except Queue.Empty:
                 time.sleep(0.0005)
                 continue
-            if process_me is None:
+            if permission_slip is None:
                 break #We're done
             else:
                 """Fill the buffer with something"""
+                process_me = permission_slip['which_buffer']
                 info("start buffer %i"%(process_me))
                 with data_buffers[process_me].get_lock():
                     a = np.frombuffer(data_buffers[process_me].get_obj(),
@@ -264,7 +268,7 @@ if camera_child_process is None:
                                           :buffer_shape[2]]
     ##            time.sleep(0.013)
                 info("end buffer %i"%(process_me))
-                output_queue.put(process_me)
+                output_queue.put(permission_slip)
         return None
 
 class Data_Pipeline_Accumulation:
@@ -337,14 +341,15 @@ def accumulation_child_process(
                 accumulation_buffer_occupied = False
                 num_accumulated = 0
         try: #Check for a pending data buffer
-            process_me = data_buffer_input_queue.get_nowait()
+            permission_slip = data_buffer_input_queue.get_nowait()
         except Queue.Empty: #Nothing pending. Back to square one.
             time.sleep(0.0005)
             continue
-        if process_me is None: #Poison pill. Quit!
+        if permission_slip is None: #Poison pill. Quit!
             break
         else:
             """Accumulate the data buffer"""
+            process_me = permission_slip['which_buffer']
             info("start buffer %i"%(process_me))
             with data_buffers[process_me].get_lock():
                 data = np.frombuffer(
@@ -361,7 +366,7 @@ def accumulation_child_process(
                         a_b[:] = data
                         accumulation_buffer_occupied = True
             num_accumulated += 1
-            data_buffer_output_queue.put(process_me)
+            data_buffer_output_queue.put(permission_slip)
             info("end buffer %i"%(process_me))
     return None
 
@@ -775,46 +780,38 @@ def file_saving_child_process(
     commands,
     ):
     buffer_size = np.prod(buffer_shape)
-    file_info = []
     while True:
         if commands.poll():
             cmd, args = commands.recv()
-            if cmd == 'file_info':
-                info("%s %s"%(repr(cmd), repr(args)))
-                file_info.append(args)
-            elif cmd == 'set_buffer_shape':
+            if cmd == 'set_buffer_shape':
                 buffer_shape = args['shape']
                 buffer_size = np.prod(buffer_shape)
                 commands.send(buffer_shape)
             continue
         try:
-            process_me = input_queue.get_nowait()
+            permission_slip = input_queue.get_nowait()
         except Queue.Empty:
             time.sleep(0.0005)
             continue
-        if process_me is None:
+        if permission_slip is None:
             break
         else:
+            process_me = permission_slip['which_buffer']
             info("start buffer %i"%(process_me))
-            if len(file_info) > 0:
+            if 'file_info' in permission_slip:
                 """
                 We only save the file if we have information for it.
                 """
-                args = file_info.pop(0)
-                save_me = args.pop('buffer_number')
-                if save_me != process_me:
-                    raise UserWarning(
-                        "Attempting to save buffer %i" +
-                        " with information for buffer %i"%(process_me, save_me))
                 info("saving buffer %i"%(process_me))
                 """Copy the buffer to disk"""
+                file_info = permission_slip['file_info']
                 with data_buffers[process_me].get_lock():
                     a = np.frombuffer(data_buffers[process_me].get_obj(),
                                       dtype=np.uint16)[:buffer_size
                                                        ].reshape(buffer_shape)
-                    simple_tif.array_to_tif(a, **args)
+                    simple_tif.array_to_tif(a, **file_info)
             info("end buffer %i"%(process_me))
-            output_queue.put(process_me)
+            output_queue.put(permission_slip)
     return None
 
 if __name__ == '__main__':

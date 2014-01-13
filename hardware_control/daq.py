@@ -22,6 +22,16 @@ else:
 
 ##class DAQ_with_queue:
 ##    def __init__(self):
+##        """
+##        Expected use pattern:
+##         Initialize
+##         Add voltages to the queue
+##         Start 'playing' the voltages in the queue
+##         Add voltages to the queue on the fly
+##         Any time the queue is empty, voltages return to (safe?) defaults
+##         Stop 'playing'
+##         Close.
+##        """
 ##        self.input_queue = mp.Queue()
 ##        self.commands, self.child_commands = mp.Pipe()
 ##        self.child = mp.Process(
@@ -53,35 +63,25 @@ else:
 class DAQ:
     def __init__(
         self,
-        buffer_length=10000,
         num_channels=8,
         default_voltage=None,
         rate=1e5,
-        regenerate
+        regenerate=False,
+        write_length=10000,
         ):
-        """
-        Expected use pattern:
-         Initialize
-         Add voltages to the queue
-         Start 'playing' the voltages in the queue
-         Add voltages to the queue on the fly
-         Any time the queue is empty, voltages return to (safe?) defaults
-         Stop 'playing'
-         Close.
-        """
         print "Opening DAQ card..."
         api = ctypes.cdll.LoadLibrary("nicaiu")
         print "DAQ card open."
         if default_voltage == None:
             default_voltage = [0 for i in range(num_channels)]
+        else:
+            assert len(default_voltage) == num_channels
         self.default_voltage = numpy.zeros(
-            (buffer_length, num_channels), dtype=numpy.float64)
+            (write_length, num_channels), dtype=numpy.float64)
         for i, v in enumerate(default_voltage):
             self.default_voltage[:, i].fill(v)
         self.voltage = self.default_voltage.copy()
-        self.voltage_queue = []
-        self.voltage_queue_bookmark = 0
-        self.buffer_length = buffer_length
+        self.write_length = write_length
         self.num_channels = num_channels
         self.taskHandle = ctypes.c_void_p(0)
         self.num_points_written = ctypes.c_ulong(0)
@@ -98,10 +98,84 @@ class DAQ:
             ))
         print "DAQ initialized"
 
-        self.set_rate(5e5)
-        self.set_regeneration(False)
-        self.register_callback_for_every_n_samples()
-        self.set_output_buffer_size(2*buffer_length)
+        self.set_rate(rate)
+        self.set_regeneration(regenerate)
+        self.set_output_buffer_size(2 * write_length)
         self.write_voltage()
         self.write_voltage()
         return None
+
+    def set_rate(self, rate):
+        self.rate = rate
+        DAQmxErrChk(api.DAQmxCfgSampClkTiming(
+            self.taskHandle,
+            ctypes.c_void_p(0),#NULL, to specify onboard clock for timing
+            ctypes.c_double(self.rate),
+            10280, #DAQmx_Val_Rising, doesn't matter
+            10123, #DAQmx_Val_ContSamps (Run continuous)
+            2 * self.write_length))
+        print "DAQ card scan rate set to", self.rate, "points per second"
+        return None
+
+    def set_regeneration(self, allow=True):
+        """
+        Disable signal regeneration
+        """
+        if allow:
+            val = 10097 #DAQmx_Val_AllowRegen
+        else:
+            val = 10158 #DAQmx_Val_DoNotAllowRegen
+        DAQmxErrChk(api.DAQmxSetWriteAttribute(
+            self.taskHandle,
+            5203, #DAQmx_Write_RegenMode
+            val,
+            ))
+        print "DAQ card regeneration mode set to:", allow
+        return None
+
+    def set_output_buffer_size(self, size):
+        DAQmxErrChk(api.DAQmxCfgOutputBuffer(self.taskHandle, size))
+        print "DAQ output buffer enlarged to:", size
+        return None
+
+    def write_voltage(self, write_default=False):
+        if write_default:
+            voltage = self.default_voltage
+        else:
+            voltage = self.voltage
+        DAQmxErrChk(api.DAQmxWriteAnalogF64(
+            self.taskHandle,
+            self.write_length,
+            0,
+            ctypes.c_double(10.0), #Timeout for writing.
+            1, #DAQmx_Val_GroupByScanNumber (interleaved)
+            numpy.ctypeslib.as_ctypes(voltage),
+            ctypes.byref(self.num_points_written),
+            ctypes.c_void_p(0)
+            ))
+        print self.num_points_written.value,
+        print "points written to each DAQ channel."
+        return None
+
+    def scan(self):
+        print "Scanning voltage..."
+        DAQmxErrChk(api.DAQmxStartTask(self.taskHandle))
+        return None
+
+    def stop_scan(self):
+        DAQmxErrChk(api.DAQmxStopTask(self.taskHandle))
+        print "Done scanning"
+        return None
+
+    def close(self):
+        DAQmxErrChk(api.DAQmxClearTask(self.taskHandle))
+        return None
+
+if __name__ == '__main__':
+    daq = DAQ()
+    while True:
+        try:
+            daq.write_voltages()
+        except KeyboardInterrupt:
+            break
+        

@@ -1,4 +1,5 @@
 import time
+import sys
 import ctypes
 import warnings
 import Queue
@@ -12,6 +13,7 @@ os.environ['PATH'] search path.
 If you get an error, read NIDAQmx.h to decypher it.
 """
 
+api = ctypes.cdll.LoadLibrary("nicaiu")
 log = mp.get_logger()
 info = log.info
 debug = log.debug
@@ -70,14 +72,13 @@ class DAQ:
         write_length=10000,
         ):
         print "Opening DAQ card..."
-        api = ctypes.cdll.LoadLibrary("nicaiu")
         print "DAQ card open."
         if default_voltage == None:
             default_voltage = [0 for i in range(num_channels)]
         else:
             assert len(default_voltage) == num_channels
-        self.default_voltage = numpy.zeros(
-            (write_length, num_channels), dtype=numpy.float64)
+        self.default_voltage = np.zeros(
+            (write_length, num_channels), dtype=np.float64)
         for i, v in enumerate(default_voltage):
             self.default_voltage[:, i].fill(v)
         self.voltage = self.default_voltage.copy()
@@ -149,7 +150,7 @@ class DAQ:
             0,
             ctypes.c_double(10.0), #Timeout for writing.
             1, #DAQmx_Val_GroupByScanNumber (interleaved)
-            numpy.ctypeslib.as_ctypes(voltage),
+            np.ctypeslib.as_ctypes(voltage),
             ctypes.byref(self.num_points_written),
             ctypes.c_void_p(0)
             ))
@@ -171,11 +172,24 @@ class DAQ:
         DAQmxErrChk(api.DAQmxClearTask(self.taskHandle))
         return None
 
+def DAQmxErrChk(err_code):
+    if err_code != 0:
+        num_bytes = api.DAQmxGetExtendedErrorInfo(ctypes.c_void_p(0), 0)
+        print "Error message from NI DAQ: (", num_bytes, "bytes )"
+        errBuff = np.ctypeslib.as_ctypes(
+            np.zeros(num_bytes, dtype=np.byte))
+        api.DAQmxGetExtendedErrorInfo(errBuff, num_bytes)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            print np.ctypeslib.as_array(errBuff).tostring()
+        raise UserWarning("NI DAQ error code: %i"%(err_code))
+
 if __name__ == '__main__':
     daq = DAQ()
+    daq.scan()
     while True:
         try:
-            daq.write_voltages()
+            daq.write_voltage()
         except KeyboardInterrupt:
             break
         

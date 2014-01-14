@@ -22,45 +22,53 @@ if sys.platform == 'win32':
 else:
     clock = time.time
 
-##class DAQ_with_queue:
-##    def __init__(self):
-##        """
-##        Expected use pattern:
-##         Initialize
-##         Add voltages to the queue
-##         Start 'playing' the voltages in the queue
-##         Add voltages to the queue on the fly
+class DAQ_with_queue:
+    def __init__(self):
+        """
+        Expected use pattern:
+         Initialize
+         Add voltages to the queue on the fly
 ##         Any time the queue is empty, voltages return to (safe?) defaults
-##         Stop 'playing'
-##         Close.
-##        """
-##        self.input_queue = mp.Queue()
-##        self.commands, self.child_commands = mp.Pipe()
-##        self.child = mp.Process(
-##            target=DAQ_child_process,
-##            args=(self.child_commands,
-##                  self.input_queue),
-##            name='DAQ')
-##        self.child.start()
-##        return None
-##
-##def DAQ_child_process(commands, input_queue):
-##    daq = DAQ()
+         Stop 'playing'
+         Close.
+        """
+        self.input_queue = mp.Queue()
+        self.commands, self.child_commands = mp.Pipe()
+        self.child = mp.Process(
+            target=DAQ_child_process,
+            args=(self.child_commands,
+                  self.input_queue),
+            name='DAQ')
+        self.child.start()
+        return None
+
+    def send_voltage(self, voltage):
+        self.input_queue.put(voltage)
+        print "Sending voltage."
+        return None
+
+def DAQ_child_process(commands, input_queue):
+    daq = DAQ()
 ##    on_deck = None
 ##    on_deck_pointer = None
-##    while True:
-##        if commands.poll():
-##            info("Command received")
-##            cmd, args = commands.recv()
-##            if cmd == 'quit':
-##                break
-##        try:
-##            """
-##            Check the internal queue for a bite-sized voltage
-##            """
-##            write_this_signal = internal_queue.get_nowait()
-##            daq.
-            
+    while True:
+        if commands.poll():
+            info("Command received")
+            cmd, args = commands.recv()
+            if cmd == 'quit':
+                break
+        try:
+            """
+            Check the internal queue for a bite-sized voltage
+            """
+            write_this_signal = internal_queue.get_nowait()
+        except Queue.Empty:
+            daq.write_voltage(write_default=True)
+        else:
+            daq.set_voltage(write_this_signal, verbose=True)
+            daq.write_voltage(verbose=True)
+    daq.stop_scan()
+    daq.close()            
 
 class DAQ:
     def __init__(
@@ -139,7 +147,14 @@ class DAQ:
         print "DAQ output buffer enlarged to:", size
         return None
 
-    def write_voltage(self, write_default=False):
+    def set_voltage(self, voltage, verbose=False):
+        assert self.voltage.shape == voltage.shape
+        self.voltage[:] = voltage
+        if verbose:
+            print "Voltage set."
+        return None
+
+    def write_voltage(self, write_default=False, verbose=False):
         if write_default:
             voltage = self.default_voltage
         else:
@@ -154,8 +169,9 @@ class DAQ:
             ctypes.byref(self.num_points_written),
             ctypes.c_void_p(0)
             ))
-        print self.num_points_written.value,
-        print "points written to each DAQ channel."
+        if verbose:
+            print self.num_points_written.value,
+            print "points written to each DAQ channel."
         return None
 
     def scan(self):
@@ -185,11 +201,57 @@ def DAQmxErrChk(err_code):
         raise UserWarning("NI DAQ error code: %i"%(err_code))
 
 if __name__ == '__main__':
-    daq = DAQ()
-    daq.scan()
-    while True:
-        try:
-            daq.write_voltage()
-        except KeyboardInterrupt:
-            break
+    """
+    Test basic functionality of the DAQ object
+    """
+##    daq = DAQ()
+##    daq.scan()
+##    while True:
+##        try:
+##            daq.write_voltage()
+##        except KeyboardInterrupt:
+##            break
+    """
+    Test basic functionality of the 'DAQ_child_process' function
+    """
+    input_queue = mp.Queue()
+    commands, child_commands = mp.Pipe()
+    print "Press Ctrl-C to exit..."
+    try:
+        DAQ_child_process(commands, input_queue)
+    except KeyboardInterrupt:
+        pass
+    print "Done."
+
+##    """
+##    Test basic functionality of the 'DAQ_with_queue' object
+##    """
+##    daq = DAQ_with_queue()
+##    print "Waiting a bit..."
+##    time.sleep(2)
+##    print "Sending signal..."
+##    sig = np.zeros((10000, 8), dtype=np.float64)
+##    daq.send_voltage(sig)
+##    print "Done sending."
+##
+##    print "Waiting a bit..."
+##    time.sleep(2)
+##    print "Sending signal..."
+##    sig = np.ones((10000, 8), dtype=np.float64)
+##    daq.send_voltage(sig)
+##    print "Done sending."
+##    
+##    print "Waiting a bit..."
+##    time.sleep(2)
+##    print "Sending signal..."
+##    sig = 0.5 * np.ones((10000, 8), dtype=np.float64)
+##    daq.send_voltage(sig)
+##    print "Done sending."
+##    
+##    print "Waiting a bit..."
+##    time.sleep(2)
+##    print "Sending signal..."
+##    sig = 0 * np.ones((10000, 8), dtype=np.float64)
+##    daq.send_voltage(sig)
+##    print "Done sending."
         

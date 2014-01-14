@@ -49,6 +49,7 @@ class DAQ_with_queue:
 
 def DAQ_child_process(commands, input_queue):
     daq = DAQ()
+    daq.scan()
 ##    on_deck = None
 ##    on_deck_pointer = None
     while True:
@@ -59,9 +60,9 @@ def DAQ_child_process(commands, input_queue):
                 break
         try:
             """
-            Check the internal queue for a bite-sized voltage
+            Check the input queue for a bite-sized voltage
             """
-            write_this_signal = internal_queue.get_nowait()
+            write_this_signal = input_queue.get_nowait()
         except Queue.Empty:
             daq.write_voltage(write_default=True)
         else:
@@ -211,47 +212,47 @@ if __name__ == '__main__':
 ##            daq.write_voltage()
 ##        except KeyboardInterrupt:
 ##            break
-    """
-    Test basic functionality of the 'DAQ_child_process' function
-    """
-    input_queue = mp.Queue()
-    commands, child_commands = mp.Pipe()
-    print "Press Ctrl-C to exit..."
-    try:
-        DAQ_child_process(commands, input_queue)
-    except KeyboardInterrupt:
-        pass
-    print "Done."
+##    """
+##    Test basic functionality of the 'DAQ_child_process' function
+##    """
+##    input_queue = mp.Queue()
+##    commands, child_commands = mp.Pipe()
+##    print "Press Ctrl-C to exit..."
+##    try:
+##        DAQ_child_process(commands, input_queue)
+##    except KeyboardInterrupt:
+##        pass
+##    print "Done."
 
-##    """
-##    Test basic functionality of the 'DAQ_with_queue' object
-##    """
-##    daq = DAQ_with_queue()
-##    print "Waiting a bit..."
-##    time.sleep(2)
-##    print "Sending signal..."
-##    sig = np.zeros((10000, 8), dtype=np.float64)
-##    daq.send_voltage(sig)
-##    print "Done sending."
-##
-##    print "Waiting a bit..."
-##    time.sleep(2)
-##    print "Sending signal..."
-##    sig = np.ones((10000, 8), dtype=np.float64)
-##    daq.send_voltage(sig)
-##    print "Done sending."
-##    
-##    print "Waiting a bit..."
-##    time.sleep(2)
-##    print "Sending signal..."
-##    sig = 0.5 * np.ones((10000, 8), dtype=np.float64)
-##    daq.send_voltage(sig)
-##    print "Done sending."
-##    
-##    print "Waiting a bit..."
-##    time.sleep(2)
-##    print "Sending signal..."
-##    sig = 0 * np.ones((10000, 8), dtype=np.float64)
-##    daq.send_voltage(sig)
-##    print "Done sending."
+    """
+    Test basic functionality of the 'DAQ_with_queue' object
+    """
+    daq = DAQ_with_queue()
+    print "Waiting a bit..."
+    time.sleep(2)
+    print "Sending signal..."
+    sig = np.zeros((10000, 8), dtype=np.float64)
+    daq.send_voltage(sig)
+    print "Done sending."
+
+    print "Waiting a bit..."
+    time.sleep(2)
+    print "Sending signal..."
+    sig = np.ones((10000, 8), dtype=np.float64)
+    daq.send_voltage(sig)
+    print "Done sending."
+    
+    print "Waiting a bit..."
+    time.sleep(2)
+    print "Sending signal..."
+    sig = 0.5 * np.ones((10000, 8), dtype=np.float64)
+    daq.send_voltage(sig)
+    print "Done sending."
+    
+    print "Waiting a bit..."
+    time.sleep(2)
+    print "Sending signal..."
+    sig = 0 * np.ones((10000, 8), dtype=np.float64)
+    daq.send_voltage(sig)
+    print "Done sending."
         

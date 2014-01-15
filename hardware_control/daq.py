@@ -50,24 +50,73 @@ class DAQ_with_queue:
 def DAQ_child_process(commands, input_queue):
     daq = DAQ()
     daq.scan()
-##    on_deck = None
-##    on_deck_pointer = None
+    write_this_signal = np.zeros(0)
+    write_length = daq.write_length
+    write_this_signal_now = daq.default_voltage.copy()
     while True:
         if commands.poll():
             info("Command received")
             cmd, args = commands.recv()
             if cmd == 'quit':
                 break
-        try:
-            """
-            Check the input queue for a bite-sized voltage
-            """
-            write_this_signal = input_queue.get_nowait()
-        except Queue.Empty:
-            daq.write_voltage(write_default=True)
-        else:
-            daq.set_voltage(write_this_signal, verbose=True)
+        if write_this_signal.shape[0] == 0:
+            try:
+                """
+                Check the input queue for a bite-sized voltage
+                """
+                write_this_signal = input_queue.get_nowait()
+            except Queue.Empty:
+                daq.write_voltage(write_default=True)
+        """
+        While the amount to be written is bigger than the write length,
+        chop off the first bit you can and send that to be written
+        then check the amount that remains, repeat
+        """
+        to_be_written = write_this_signal.shape[0]
+        while to_be_written >= write_length:
+            write_this_signal_now[:] = write_this_signal[:write_length]
+            write_this_signal = write_this_signal[write_length:]
+            to_be_written = write_this_signal.shape[0]
+            daq.set_voltage(write_this_signal_now, verbose=True)
             daq.write_voltage(verbose=True)
+        
+        """
+        If your array is now too small, which it should be by this point, 
+        keep grabbing stuff and appending it on to the end until you're either 
+        too big again, or you run out of stuff to grab
+        If you're too big, get kicked out of this loop and the big loop starts
+        over again
+        If you run out of stuff to grab, write everything you have followed
+        by default values, then reset everything so next time around the
+        big loop it's a fresh start
+        """
+        while 0 < to_be_written < write_length:
+            try:
+                """
+                Check the input queue for the next voltage
+                """
+                append_me = input_queue.get_nowait()
+            except Queue.Empty:
+                """
+                Write the little bit we have followed by default voltages
+                """
+                write_this_signal_now[:to_be_written] = write_this_signal
+                daq.set_voltage(write_this_signal_now, verbose=True)
+                daq.write_voltage(verbose=True)
+                """                
+                Reset write_this_signal to 0 array so next time around
+                we get put back in the new scenario, and reset 
+                write_this_signal_now to the default array so if we try to do
+                this again we actually get the rest defaults
+                """
+                write_this_signal = np.zeros(0)
+                write_this_signal_now[:] = daq.default_voltage
+            else:
+                write_this_signal = np.concatenate(write_this_signal, 
+                                               append_me)
+            
+            to_be_written = write_this_signal.shape[0]
+
     daq.stop_scan()
     daq.close()            
 

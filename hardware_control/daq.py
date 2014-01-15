@@ -79,7 +79,6 @@ def DAQ_child_process(commands, input_queue):
             to_be_written = write_this_signal.shape[0]
             daq.set_voltage(write_this_signal_now, verbose=True)
             daq.write_voltage(verbose=True)
-        
         """
         If your array is now too small, which it should be by this point, 
         keep grabbing stuff and appending it on to the end until you're either 
@@ -286,15 +285,21 @@ if __name__ == '__main__':
 
     print "Waiting a bit..."
     time.sleep(2)
-    print "Sending signal..."
-    sig = np.ones((10000, 8), dtype=np.float64)
-    daq.send_voltage(sig)
+    print "Sending several small signals..."
+    sig1 = np.ones((2500, 8), dtype=np.float64)
+    sig2 = 0.75 * np.ones((2500, 8), dtype=np.float64)
+    sig3 = 0.5 * np.ones((2500, 8), dtype=np.float64)
+    sig4 = 0.25 * np.ones((2500, 8), dtype=np.float64)
+    daq.send_voltage(sig1)
+    daq.send_voltage(sig2)
+    daq.send_voltage(sig3)
+    daq.send_voltage(sig4)
     print "Done sending."
     
     print "Waiting a bit..."
     time.sleep(2)
-    print "Sending signal..."
-    sig = 0.5 * np.ones((10000, 8), dtype=np.float64)
+    print "Sending a too big signal..."
+    sig = 0.5 * np.ones((25000, 8), dtype=np.float64)
     daq.send_voltage(sig)
     print "Done sending."
     

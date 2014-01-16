@@ -28,7 +28,7 @@ class DAQ_with_queue:
         Expected use pattern:
          Initialize
          Add voltages to the queue on the fly
-##         Any time the queue is empty, voltages return to (safe?) defaults
+         Any time the queue is empty, voltages return to (safe?) defaults
          Stop 'playing'
          Close.
         """
@@ -90,6 +90,8 @@ def DAQ_child_process(commands, input_queue):
         big loop it's a fresh start
         """
         while 0 < to_be_written < write_length:
+            time.sleep(0.05)  ##Need this if you are going to try to test
+            ##appending voltages
             try:
                 """
                 Check the input queue for the next voltage
@@ -111,8 +113,8 @@ def DAQ_child_process(commands, input_queue):
                 write_this_signal = np.zeros(0)
                 write_this_signal_now[:] = daq.default_voltage
             else:
-                write_this_signal = np.concatenate(write_this_signal, 
-                                               append_me)
+                write_this_signal = np.concatenate((write_this_signal,
+                                                    append_me))
             
             to_be_written = write_this_signal.shape[0]
 
@@ -250,6 +252,9 @@ def DAQmxErrChk(err_code):
         raise UserWarning("NI DAQ error code: %i"%(err_code))
 
 if __name__ == '__main__':
+    import logging
+    logger = mp.log_to_stderr()
+    logger.setLevel(logging.INFO)
     """
     Test basic functionality of the DAQ object
     """
@@ -286,10 +291,10 @@ if __name__ == '__main__':
     print "Waiting a bit..."
     time.sleep(2)
     print "Sending several small signals..."
-    sig1 = np.ones((2500, 8), dtype=np.float64)
-    sig2 = 0.75 * np.ones((2500, 8), dtype=np.float64)
-    sig3 = 0.5 * np.ones((2500, 8), dtype=np.float64)
-    sig4 = 0.25 * np.ones((2500, 8), dtype=np.float64)
+    sig1 = np.ones((5000, 8), dtype=np.float64)
+    sig2 = 0.75 * np.ones((5000, 8), dtype=np.float64)
+    sig3 = 0.5 * np.ones((5000, 8), dtype=np.float64)
+    sig4 = 0.25 * np.ones((26000, 8), dtype=np.float64)
     daq.send_voltage(sig1)
     daq.send_voltage(sig2)
     daq.send_voltage(sig3)

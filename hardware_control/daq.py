@@ -316,6 +316,44 @@ if __name__ == '__main__':
 ##        pass
 ##    print "Done."
 
+##    """
+##    Test basic functionality of the 'DAQ_with_queue' object
+##    """
+##    daq = DAQ_with_queue()
+##    print "Waiting a bit..."
+##    time.sleep(2)
+##    print "Sending signal..."
+##    sig = np.zeros((10000, 8), dtype=np.float64)
+##    daq.send_voltage(sig)
+##    print "Done sending."
+##
+##    print "Waiting a bit..."
+##    time.sleep(2)
+##    print "Sending several small signals..."
+##    sig1 = np.ones((5000, 8), dtype=np.float64)
+##    sig2 = 0.75 * np.ones((5000, 8), dtype=np.float64)
+##    sig3 = 0.5 * np.ones((5000, 8), dtype=np.float64)
+##    sig4 = 0.25 * np.ones((26000, 8), dtype=np.float64)
+##    daq.send_voltage(sig1)
+##    daq.send_voltage(sig2)
+##    daq.send_voltage(sig3)
+##    daq.send_voltage(sig4)
+##    print "Done sending."
+##    
+##    print "Waiting a bit..."
+##    time.sleep(2)
+##    print "Sending a too big signal..."
+##    sig = 0.5 * np.ones((25000, 8), dtype=np.float64)
+##    daq.send_voltage(sig)
+##    print "Done sending."
+##    
+##    print "Waiting a bit..."
+##    time.sleep(2)
+##    print "Sending signal..."
+##    sig = 0 * np.ones((10000, 8), dtype=np.float64)
+##    daq.send_voltage(sig)
+##    print "Done sending."
+
     """
     Test basic functionality of the 'DAQ_with_queue' object
     """
@@ -323,34 +361,23 @@ if __name__ == '__main__':
     print "Waiting a bit..."
     time.sleep(2)
     print "Sending signal..."
-    sig = np.zeros((10000, 8), dtype=np.float64)
-    daq.send_voltage(sig)
-    print "Done sending."
-
-    print "Waiting a bit..."
-    time.sleep(2)
-    print "Sending several small signals..."
-    sig1 = np.ones((5000, 8), dtype=np.float64)
-    sig2 = 0.75 * np.ones((5000, 8), dtype=np.float64)
-    sig3 = 0.5 * np.ones((5000, 8), dtype=np.float64)
-    sig4 = 0.25 * np.ones((26000, 8), dtype=np.float64)
-    daq.send_voltage(sig1)
-    daq.send_voltage(sig2)
-    daq.send_voltage(sig3)
-    daq.send_voltage(sig4)
-    print "Done sending."
-    
-    print "Waiting a bit..."
-    time.sleep(2)
-    print "Sending a too big signal..."
-    sig = 0.5 * np.ones((25000, 8), dtype=np.float64)
+    sig = np.ones((10000, 8), dtype=np.float64)
     daq.send_voltage(sig)
     print "Done sending."
     
-    print "Waiting a bit..."
-    time.sleep(2)
-    print "Sending signal..."
-    sig = 0 * np.ones((10000, 8), dtype=np.float64)
-    daq.send_voltage(sig)
-    print "Done sending."
+    for i in range(10):
+        try:
+            print "Sending new signals"
+            print i 
+            sig1= 4 * (np.random.random_sample((np.random.randint(1,60000), 8))) - 2
+            sig2= 4 * (np.random.random_sample((np.random.randint(1,60000), 8))) - 2
+            daq.send_voltage(sig1)
+            daq.send_voltage(sig2)
+            time.sleep(4*np.random.random_sample())
+        except KeyboardInterrupt:
+            break
+    daq.close()
+    
+            
+        
         

@@ -23,7 +23,12 @@ else:
     clock = time.time
 
 class DAQ_with_queue:
-    def __init__(self):
+    def __init__(self,
+        num_channels=8,
+        default_voltage=None,
+        rate=1e5,
+        regenerate=False,
+        write_length=10000):
         """
         Expected use pattern:
          Initialize
@@ -37,7 +42,11 @@ class DAQ_with_queue:
         self.child = mp.Process(
             target=DAQ_child_process,
             args=(self.child_commands,
-                  self.input_queue),
+                  self.input_queue,
+                  num_channels,
+                  default_voltage,
+                  rate,
+                  write_length),
             name='DAQ')
         self.child.start()
         return None
@@ -46,19 +55,28 @@ class DAQ_with_queue:
         self.input_queue.put(voltage)
         print "Sending voltage."
         return None
+        
+    def close(self):
+        self.commands.send('quit')
+        self.child.join()
+        return None
+        
 
-def DAQ_child_process(commands, input_queue):
-    daq = DAQ()
+def DAQ_child_process(commands,
+                      input_queue,
+                      num_channels,
+                      default_voltage,
+                      rate,
+                      write_length):
+    daq = DAQ(num_channels = num_channels,
+              default_voltage = default_voltage,
+              rate = rate,
+              write_length = write_length)
     daq.scan()
     write_this_signal = np.zeros(0)
     write_length = daq.write_length
     write_this_signal_now = daq.default_voltage.copy()
     while True:
-        if commands.poll():
-            info("Command received")
-            cmd, args = commands.recv()
-            if cmd == 'quit':
-                break
         if write_this_signal.shape[0] == 0:
             try:
                 """
@@ -79,9 +97,27 @@ def DAQ_child_process(commands, input_queue):
             to_be_written = write_this_signal.shape[0]
             daq.set_voltage(write_this_signal_now, verbose=True)
             daq.write_voltage(verbose=True)
+
+        if commands.poll():
+            info("Command received")
+            cmd, args = commands.recv()
+            if cmd == 'quit':
+                if write_this_signal.shape[0] == 0:
+                    daq.write_voltage(write_default=True)
+                    break
+                else:
+                    to_be_written = write_this_signal.shape[0]
+                    write_this_signal_now[:to_be_written] = write_this_signal
+                    write_this_signal_now[
+                        to_be_written:] = daq.default_voltage[to_be_written:]
+                    daq.set_voltage(write_this_signal_now, verbose=True)
+                    daq.write_voltage(verbose=True)
+                    break
+                
+        
         """
-        If your array is now too small, which it should be by this point, 
-        keep grabbing stuff and appending it on to the end until you're either 
+        If your array is now too small, which it should be by this point,
+        keep grabbing stuff and appending it on to the end until you're either
         too big again, or you run out of stuff to grab
         If you're too big, get kicked out of this loop and the big loop starts
         over again
@@ -102,22 +138,23 @@ def DAQ_child_process(commands, input_queue):
                 Write the little bit we have followed by default voltages
                 """
                 write_this_signal_now[:to_be_written] = write_this_signal
+                write_this_signal_now[
+                        to_be_written:] = daq.default_voltage[to_be_written:]
                 daq.set_voltage(write_this_signal_now, verbose=True)
                 daq.write_voltage(verbose=True)
                 """                
                 Reset write_this_signal to 0 array so next time around
-                we get put back in the new scenario, and reset 
-                write_this_signal_now to the default array so if we try to do
-                this again we actually get the rest defaults
+                we get put back in the new scenario
                 """
                 write_this_signal = np.zeros(0)
-                write_this_signal_now[:] = daq.default_voltage
             else:
                 write_this_signal = np.concatenate((write_this_signal,
                                                     append_me))
             
             to_be_written = write_this_signal.shape[0]
-
+    ##Have Exited loop            
+    for i in range((daq.output_buffer_size//daq.write_length)-1):
+        daq.write_voltage(write_default=True)
     daq.stop_scan()
     daq.close()            
 
@@ -194,6 +231,8 @@ class DAQ:
         return None
 
     def set_output_buffer_size(self, size):
+        assert size % self.write_length == 0
+        self.output_buffer_size = size
         DAQmxErrChk(api.DAQmxCfgOutputBuffer(self.taskHandle, size))
         print "DAQ output buffer enlarged to:", size
         return None

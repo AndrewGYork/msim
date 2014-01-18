@@ -102,7 +102,7 @@ def best_fft_shape(shape):
             shape[i] += 1
     return shape.astype(int)
 
-def preprocess_input_2(in1, in2):
+def preprocess_input_2(in1, in2, padding='zeros'):
     """
     Often, we call 'fftconvolve' many times with different 'in1' but
     the same 'in2'. In this case, it's a waste to spend 1/3 of the
@@ -119,11 +119,38 @@ def preprocess_input_2(in1, in2):
     size = s1 + s2 - 1
     #Pad to get better performance, but not necessarily to 2**n
     fsize = best_fft_shape(size)
+    if padding == 'zeros':
+        in2_prepadded = in2
+    elif padding == 'psf_style' or 'psf_style_zeros':
+        """
+        A very special case, but common in our work. Point-spread
+        functions often continue indefinately in the Z-direction, and
+        zero-padding is unphysical. In this case, padding with
+        repetitions of the edge is more appropriate.
+        """
+        assert len(in2.shape) == 3 #Only sane for 3D PSF
+        z_pad_total = fsize[0] - s2[0]
+        z_pad_top = z_pad_total // 2
+        z_pad_bottom = z_pad_total - z_pad_top
+        if padding == 'psf_style_zeros':
+            mode = 'constant' #For testing against fftconvolve
+        else:
+            mode = 'edge' #For our actual application
+        in2_prepadded = np.pad(
+            in2,
+            pad_width=((z_pad_top, z_pad_bottom), (0, 0), (0, 0)),
+            mode=mode)
+        """
+        fft-based padding puts all the padding on the end of the signal:
+        """
+        in2_prepadded = np.roll(in2_prepadded, shift=-z_pad_top, axis=0)
+    """
+    Use the FFT to achieve any remaining zero-padding.
+    """
     if complex_result:
-        in2_preprocessed = np.fft.fftn(in2, fsize)
+        in2_preprocessed = np.fft.fftn(in2_prepadded, fsize)
     else:
-        in2_preprocessed = np.fft.rfftn(in2, fsize)
-    
+        in2_preprocessed = np.fft.rfftn(in2_prepadded, fsize) 
     return (in2_preprocessed, complex_result, size, fsize, s1, s2)
 
 if __name__ == '__main__':
@@ -135,11 +162,13 @@ if __name__ == '__main__':
     else:
         clock = time.time
 
-    for s in range(50, 300):
-        shape = (s, s)
+    for s in range(10, 100):
+        shape = (s, s, s)
         print shape
         a = np.arange(np.prod(shape), dtype=np.float64).reshape(shape)
         preprocessed_input = preprocess_input_2(a, a)
+        padded_preprocessed_input = preprocess_input_2(
+            a, a, padding='psf_style_zeros')
 
         start1 = clock()
         x = fftconvolve_old(a, a, mode='same')
@@ -154,19 +183,30 @@ if __name__ == '__main__':
             a, a, mode='same', preprocessed_input=preprocessed_input)
         end3 = clock()
 
-        if (np.abs(x - y).max() / y.mean() > 1e-10 or
-            np.abs(x - z).max() / y.mean() > 1e-10):
+        start4 = clock()
+        zz = fftconvolve(
+            a, a, mode='same', preprocessed_input=padded_preprocessed_input)
+        end4 = clock()
+
+        if (np.abs(x - y).max() / x.mean() > 1e-10 or
+            np.abs(x - z).max() / x.mean() > 1e-10 or
+            np.abs(x - zz).max() / x.mean() > 1e-10):
             print 20*"*\n*"
             print "***WARNING: different answers!***"
 
         speedup_1 = (end1 - start1) / (end2 - start2 + 1e-9)
         speedup_2 = (end1 - start1) / (end3 - start3 + 1e-9)
+        speedup_3 = (end1 - start1) / (end4 - start4 + 1e-9)
 
         print "Speedup:", speedup_1
         print "Speedup:", speedup_2, "with preprocessing."
+        print "Speedup:", speedup_3, "with preprocessing and padding."
         if speedup_1 < 1:
             print "***NO SPEEDUP***"
             print
         if speedup_2 < speedup_1:
             print "***NO BENEFIT FROM PREPROCESSING***"
+            print
+        if speedup_3 < speedup_1:
+            print "***NO BENEFIT FROM PREPROCESSING WITH PADDING***"
             print

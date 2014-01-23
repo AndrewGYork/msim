@@ -57,7 +57,7 @@ class DAQ_with_queue:
         return None
         
     def close(self):
-        self.commands.send('quit')
+        self.commands.send(('quit', {}))
         self.child.join()
         return None
         
@@ -354,30 +354,62 @@ if __name__ == '__main__':
 ##    daq.send_voltage(sig)
 ##    print "Done sending."
 
+##    """
+##    Test basic functionality of the 'DAQ_with_queue' object
+##    """
+##    daq = DAQ_with_queue()
+##    print "Waiting a bit..."
+##    time.sleep(2)
+##    print "Sending signal..."
+##    sig = np.ones((10000, 8), dtype=np.float64)
+##    daq.send_voltage(sig)
+##    print "Done sending."
+##    
+##    for i in range(10):
+##        try:
+##            print "Sending new signals"
+##            print i 
+##            sig1= 4 * (np.random.random_sample((np.random.randint(1,60000), 8))) - 2
+##            sig2= 4 * (np.random.random_sample((np.random.randint(1,60000), 8))) - 2
+##            daq.send_voltage(sig1)
+##            daq.send_voltage(sig2)
+##            time.sleep(4*np.random.random_sample())
+##        except KeyboardInterrupt:
+##            break
+##    daq.close()
+##    
+            
     """
     Test basic functionality of the 'DAQ_with_queue' object
     """
-    daq = DAQ_with_queue()
-    print "Waiting a bit..."
-    time.sleep(2)
-    print "Sending signal..."
-    sig = np.ones((10000, 8), dtype=np.float64)
-    daq.send_voltage(sig)
-    print "Done sending."
+
     
-    for i in range(10):
-        try:
-            print "Sending new signals"
-            print i 
-            sig1= 4 * (np.random.random_sample((np.random.randint(1,60000), 8))) - 2
-            sig2= 4 * (np.random.random_sample((np.random.randint(1,60000), 8))) - 2
-            daq.send_voltage(sig1)
-            daq.send_voltage(sig2)
-            time.sleep(4*np.random.random_sample())
-        except KeyboardInterrupt:
-            break
+##    duration = 1
+##    cycles_per_second = 2
+##    points_per_cycle = 100000
+##    rate = points_per_cycle * cycles_per_second
+##    daq = DAQ_with_queue(rate=rate)
+##    for i in range(duration):
+##        sig = np.zeros((rate, 8), dtype=np.float64)
+##        sig[:,0] = np.sin(np.linspace( 0, 2 * np.pi * cycles_per_second, rate))
+##        daq.send_voltage(sig)
+##        
+##    time.sleep(0.5)
+##    daq.close()
+##
+##    raw_input()
+    
+
+    duration = 1
+    cycles_per_second = 440
+    points_per_cycle = 500
+    rate = points_per_cycle * cycles_per_second
+    daq = DAQ_with_queue(rate=rate)
+    for i in range(duration):
+        sig = np.zeros((rate, 8), dtype=np.float64)
+        sig[:,5] = np.sin(np.linspace( 0, 2 * np.pi * cycles_per_second, rate))
+        daq.send_voltage(sig)
+
+    time.sleep(0.5)
     daq.close()
-    
-            
-        
-        
+

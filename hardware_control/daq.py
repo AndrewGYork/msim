@@ -152,9 +152,10 @@ def DAQ_child_process(commands,
                                                     append_me))
             
             to_be_written = write_this_signal.shape[0]
-    ##Have Exited loop            
-    for i in range((daq.output_buffer_size//daq.write_length)-1):
+    ##Have Exited loop (maybe daq.write length - 1??
+    for i in range((daq.output_buffer_size//daq.write_length)):
         daq.write_voltage(write_default=True)
+
     daq.stop_scan()
     daq.close()            
 

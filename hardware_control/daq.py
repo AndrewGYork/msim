@@ -290,6 +290,14 @@ def DAQmxErrChk(err_code):
             print np.ctypeslib.as_array(errBuff).tostring()
         raise UserWarning("NI DAQ error code: %i"%(err_code))
 
+def playtone(hz, duration=1):
+    cycles_per_second = hz
+    for i in range(duration):
+        sig = np.zeros((rate, 8), dtype=np.float64)
+        sig[:,0] = np.sin(np.linspace( 0, 2 * np.pi * cycles_per_second, rate))
+        ##sig[:,5] = np.sin(np.linspace( 0, 2 * np.pi * cycles_per_second, rate))
+        daq.send_voltage(sig)
+
 if __name__ == '__main__':
     import logging
     logger = mp.log_to_stderr()
@@ -400,16 +408,17 @@ if __name__ == '__main__':
 ##    raw_input()
     
 
-    duration = 1
-    cycles_per_second = 440
-    points_per_cycle = 500
-    rate = points_per_cycle * cycles_per_second
+##    duration = 1
+##    cycles_per_second = 440
+##    points_per_cycle = 500
+##    rate = points_per_cycle * cycles_per_second
+    rate = 200000
     daq = DAQ_with_queue(rate=rate)
-    for i in range(duration):
-        sig = np.zeros((rate, 8), dtype=np.float64)
-        sig[:,5] = np.sin(np.linspace( 0, 2 * np.pi * cycles_per_second, rate))
-        daq.send_voltage(sig)
+##    for i in range(duration):
+##        sig = np.zeros((rate, 8), dtype=np.float64)
+##        sig[:,5] = np.sin(np.linspace( 0, 2 * np.pi * cycles_per_second, rate))
+##        daq.send_voltage(sig)
 
-    time.sleep(0.5)
-    daq.close()
+    playtone(440,1)
+    raw_input()
 

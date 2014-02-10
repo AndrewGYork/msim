@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Jan 10 16:17:55 2014
-
-@author: John
-"""
-
 import numpy as np
 from simple_tif import array_to_tif, tif_to_array
 

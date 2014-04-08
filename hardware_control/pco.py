@@ -13,7 +13,16 @@ libc = ctypes.cdll.msvcrt
 libc.fopen.restype = ctypes.c_void_p
 
 class Edge:
-    def __init__(self):
+    def __init__(self, pco_edge_type='5.5'):
+        """
+        If I were a real man, I would actually check with the camera
+        to find out what type it thinks it is. I'm not sure which API
+        call gives this info reliably, and to be honest I suck at
+        making PCO structs. For now, this is faster:
+        """
+        assert pco_edge_type in ('4.2', '5.5')
+        self.pco_edge_type = pco_edge_type
+        
         self.camera_handle = ctypes.c_void_p()
         print "Opening camera..."
         try:
@@ -31,6 +40,17 @@ class Edge:
     def apply_settings(
         self, trigger='auto trigger', exposure_time_microseconds=2200,
         region_of_interest=(961, 841, 1440, 1320), verbose=True):
+        """
+        'trigger' can be:
+         'auto trigger'
+         'software trigger'
+         'external trigger/software exposure control'
+         'external exposure control'
+        See the comment block below for explanation of what these mean.
+
+        'exposure_time_microseconds' can be as low as 500 and as high
+        as 1000000
+        """
         
         self.disarm(verbose=verbose)
         PCO_api.PCO_ResetSettingsToDefault(self.camera_handle)
@@ -109,7 +129,7 @@ class Edge:
         wStorageMode = ctypes.c_uint16()
         PCO_api.PCO_GetStorageMode(
             self.camera_handle, ctypes.byref(wStorageMode))
-        mode_names = {0: "Recorder", 1: "FIFO buffer"} #Not critical for pco.edge
+        mode_names = {0: "Recorder", 1: "FIFO buffer"}#Not critical for pco.edge
         if verbose:
             print "Storage mode:", mode_names[wStorageMode.value]
 
@@ -134,7 +154,12 @@ class Edge:
 
         if verbose:
             print "Setting pixel rate..."
-        dwPixelRate = ctypes.c_uint32(286000000)
+        if self.pco_edge_type == '4.2':
+            dwPixelRate = ctypes.c_uint32(272250000)
+        elif self.pco_edge_type == '5.5':
+            dwPixelRate = ctypes.c_uint32(286000000)
+        else:
+            raise UserWarning("Unknown PCO edge type")
         PCO_api.PCO_SetPixelRate(self.camera_handle, dwPixelRate)
         PCO_api.PCO_GetPixelRate(self.camera_handle, ctypes.byref(dwPixelRate))
         if verbose:
@@ -142,6 +167,9 @@ class Edge:
 
         if verbose:
             print "Setting delay and exposure time..."
+        if 500 > exposure_time_microseconds < 1000000:
+            raise UserWarning(
+                "exposure_time_microseconds must be between 500 and 1000000")
         dwDelay = ctypes.c_uint32(0)
         wTimeBaseDelay = ctypes.c_uint16(0)
         dwExposure = ctypes.c_uint32(int(exposure_time_microseconds))
@@ -158,7 +186,10 @@ class Edge:
             print " Exposure:", dwExposure.value, mode_names[wTimeBaseExposure.value]
             print " Delay:", dwDelay.value, mode_names[wTimeBaseDelay.value]
 
-        x0, y0, x1, y1 = enforce_roi(region_of_interest, verbose=verbose)
+        x0, y0, x1, y1 = enforce_roi(
+            region_of_interest,
+            pco_edge_type=self.pco_edge_type,
+            verbose=verbose)
 
         wRoiX0, wRoiY0, wRoiX1, wRoiY1 = (
             ctypes.c_uint16(x0), ctypes.c_uint16(y0),
@@ -171,9 +202,11 @@ class Edge:
                            ctypes.byref(wRoiX1), ctypes.byref(wRoiY1))
         if verbose:
             print " Camera ROI:"
-            """We typically use 841 to 1320 u/d, 961 to 1440 l/r"""
-            print "  From pixel", wRoiX0.value, "to pixel", wRoiX1.value, "(left/right)"
-            print "  From pixel", wRoiY0.value, "to pixel", wRoiY1.value, "(up/down)"
+            """We typically use 841 to 1320 u/d, 961 to 1440 l/r  for the 5.5"""
+            print "  From pixel", wRoiX0.value,
+            print "to pixel", wRoiX1.value, "(left/right)"
+            print "  From pixel", wRoiY0.value,
+            print "to pixel", wRoiY1.value, "(up/down)"
             print
 
         if hasattr(self, '_prepared_to_record'):
@@ -619,29 +652,29 @@ class Edge:
 
     def _set_hw_io_ch4_to_global_exposure(self, verbose=True):
         class HWIOSignalTimingStructureIn(ctypes.Structure):
-                        _fields_ = [("code", ctypes.c_uint16),
-                                    ("length", ctypes.c_uint16),
-                                    ("index", ctypes.c_uint16),
-                                    ("select", ctypes.c_uint16),
-                                    ("parameter", ctypes.c_uint32),
-                                    ("Reserved0", ctypes.c_uint32),
-                                    ("Reserved1", ctypes.c_uint32),
-                                    ("Reserved2", ctypes.c_uint32),
-                                    ("Reserved3", ctypes.c_uint32),
-                                    ("checksum", ctypes.c_uint8)]
+            _fields_ = [("code", ctypes.c_uint16),
+                        ("length", ctypes.c_uint16),
+                        ("index", ctypes.c_uint16),
+                        ("select", ctypes.c_uint16),
+                        ("parameter", ctypes.c_uint32),
+                        ("Reserved0", ctypes.c_uint32),
+                        ("Reserved1", ctypes.c_uint32),
+                        ("Reserved2", ctypes.c_uint32),
+                        ("Reserved3", ctypes.c_uint32),
+                        ("checksum", ctypes.c_uint8)]
 
         class HWIOSignalTimingStructureOut(ctypes.Structure):
-                        _fields_ = [("code", ctypes.c_uint16),
-                                    ("length", ctypes.c_uint16),
-                                    ("index", ctypes.c_uint16),
-                                    ("select", ctypes.c_uint16),
-                                    ("type", ctypes.c_uint32),
-                                    ("parameter", ctypes.c_uint32),
-                                    ("Reserved0", ctypes.c_uint32),
-                                    ("Reserved1", ctypes.c_uint32),
-                                    ("Reserved2", ctypes.c_uint32),
-                                    ("Reserved3", ctypes.c_uint32),
-                                    ("checksum", ctypes.c_uint8)]
+            _fields_ = [("code", ctypes.c_uint16),
+                        ("length", ctypes.c_uint16),
+                        ("index", ctypes.c_uint16),
+                        ("select", ctypes.c_uint16),
+                        ("type", ctypes.c_uint32),
+                        ("parameter", ctypes.c_uint32),
+                        ("Reserved0", ctypes.c_uint32),
+                        ("Reserved1", ctypes.c_uint32),
+                        ("Reserved2", ctypes.c_uint32),
+                        ("Reserved3", ctypes.c_uint32),
+                        ("checksum", ctypes.c_uint8)]
         message = HWIOSignalTimingStructureIn()
         response = HWIOSignalTimingStructureOut()
 
@@ -683,25 +716,44 @@ class DMAError(Exception):
     def __str__(self):
         return repr(self.value)
 
-def enforce_roi(region_of_interest, verbose):
+def enforce_roi(region_of_interest, pco_edge_type, verbose):
     x0, y0, x1, y1 = tuple(region_of_interest)
     if verbose:
         print "ROI requested:", x0, y0, x1, y1
-    if x0 < 1:
-        x0 = 1 #Min value
-    if x0 > 2401:
-        x0 = 2401 #Max value
-    x0 = 1 + 160*((x0 - 1) // 160) #Round to the nearest start
-    if x1 < (x0 + 159):
-        x1 = x0 + 159
-    if x1 > 2560:
-        x1 = 2560        
-    x1 = x0 -1 + 160 * ((x1 - (x0 - 1))//160) #Round to the nearest end
-    if y0 < 1:
-        y0 = 1
-    if y0 > 1073:
-        y0 = 1073
-    y1 = 2161 - y0
+    if pco_edge_type == '4.2':
+        if x0 < 1:
+            x0 = 1 #Min value
+        if x0 > 2021:
+            x0 = 2021 #Max value
+        x0 = 1 + 40*((x0 - 1) // 40) #Round to the nearest start
+        if x1 < (x0 + 39):
+            x1 = x0 + 39
+        if x1 > 2060:
+            x1 = 2060        
+        x1 = x0 - 1 + 40 * ((x1 - (x0 - 1))//40) #Round to the nearest end
+        if y0 < 1:
+            y0 = 1
+        if y0 > 1021:
+            y0 = 1021
+        y1 = 2049 - y0
+    elif pco_edge_type == '5.5':
+        if x0 < 1:
+            x0 = 1 #Min value
+        if x0 > 2401:
+            x0 = 2401 #Max value
+        x0 = 1 + 160*((x0 - 1) // 160) #Round to the nearest start
+        if x1 < (x0 + 159):
+            x1 = x0 + 159
+        if x1 > 2560:
+            x1 = 2560        
+        x1 = x0 -1 + 160 * ((x1 - (x0 - 1))//160) #Round to the nearest end
+        if y0 < 1:
+            y0 = 1
+        if y0 > 1073:
+            y0 = 1073
+        y1 = 2161 - y0
+    else:
+        raise UserWarning("Unknown PCO edge type")
     if verbose:
         print "Nearest possible ROI:", x0, y0, x1, y1
     return (x0, y0, x1, y1)
@@ -734,17 +786,15 @@ libc.fclose(file_pointer)
 if __name__ == "__main__":
     import time, numpy
     times = []
-    camera = Edge()
-    camera.apply_settings(region_of_interest=(641, 841, 1440, 1320))
+    camera = Edge(pco_edge_type='4.2')
+    camera.apply_settings(
+        region_of_interest=(641, 841, 1440, 1320),
+        exposure_time_microseconds=500)
     camera.get_shutter_mode()
 ##    camera.set_shutter_mode('global')
     camera.get_settings(verbose=False)
     camera.arm(num_buffers=3)
     camera._prepare_to_record_to_memory()
-##    for i in range(100):
-##        times.append(time.clock())
-##        camera.record_to_file(num_images=1, file_name='%06i.raw'%(i))
-##    camera.close()
     print "Acquiring..."
     for i in range(100):
         times.append(time.clock())
@@ -782,4 +832,4 @@ if __name__ == "__main__":
         # If you put root.destroy() here, it will cause an error if
         # the window is closed with the window manager.
     except:
-        pass ##
+        pass

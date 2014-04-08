@@ -819,15 +819,23 @@ if __name__ == '__main__':
     logger = mp.log_to_stderr()
     logger.setLevel(logging.INFO)
 
-    idp = Image_Data_Pipeline()
+    idp = Image_Data_Pipeline(
+        num_buffers=5,
+        buffer_shape=(100, 2048, 2060))
+    idp.camera.commands.send(
+        ('apply_settings',
+         {'trigger': 'auto trigger',
+          'region_of_interest': (-1, -1, 10000, 10000),
+          'exposure_time_microseconds': 10000}))
+    print idp.camera.commands.recv()
     while True:
         try:
             idp.collect_data_buffers()
             idp.load_data_buffers(len(idp.idle_data_buffers))
             raw_input('Press Enter to continue...')
-            idp.set_buffer_shape((idp.buffer_shape[0],
-                                  idp.buffer_shape[1],
-                                  idp.buffer_shape[2] - 10))
+##            idp.set_buffer_shape((idp.buffer_shape[0],
+##                                  idp.buffer_shape[1],
+##                                  idp.buffer_shape[2] - 10))
         except KeyboardInterrupt:
             break
     idp.close()

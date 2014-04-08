@@ -725,12 +725,12 @@ def enforce_roi(region_of_interest, pco_edge_type, verbose):
             x0 = 1 #Min value
         if x0 > 2021:
             x0 = 2021 #Max value
-        x0 = 1 + 40*((x0 - 1) // 40) #Round to the nearest start
+##        x0 = 1 + 40*((x0 - 1) // 40) #Round to the nearest start
         if x1 < (x0 + 39):
             x1 = x0 + 39
         if x1 > 2060:
             x1 = 2060        
-        x1 = x0 - 1 + 40 * ((x1 - (x0 - 1))//40) #Round to the nearest end
+##        x1 = x0 - 1 + 40 * ((x1 - (x0 - 1))//40) #Round to the nearest end
         if y0 < 1:
             y0 = 1
         if y0 > 1021:

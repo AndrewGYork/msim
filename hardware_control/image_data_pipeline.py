@@ -180,6 +180,13 @@ class Image_Data_Pipeline:
     def withdraw_display(self):
         self.display.commands.send(('withdraw', {}))
 
+    def check_children(self):
+        return {'Camera': self.camera.child.is_alive(),
+                'Accumulation': self.accumulation.child.is_alive(),
+                'File Saving': self.file_saving.child.is_alive(),
+                'Projection': self.projection.child.is_alive(),
+                'Display': self.display.child.is_alive()}
+
     def close(self):
         self.camera.input_queue.put(None)
         self.accumulation.input_queue.put(None)
@@ -248,7 +255,7 @@ if camera_child_process is None:
             try:
                 permission_slip = input_queue.get_nowait()
             except Queue.Empty:
-                time.sleep(0.0005)
+                time.sleep(0.001)
                 continue
             if permission_slip is None:
                 break #We're done
@@ -343,7 +350,7 @@ def accumulation_child_process(
         try: #Check for a pending data buffer
             permission_slip = data_buffer_input_queue.get_nowait()
         except Queue.Empty: #Nothing pending. Back to square one.
-            time.sleep(0.0005)
+            time.sleep(0.001)
             continue
         if permission_slip is None: #Poison pill. Quit!
             break
@@ -415,7 +422,7 @@ def projection_child_process(
         try: #Get a pending display buffer
             fill_me = display_buffer_input_queue.get_nowait()
         except Queue.Empty:
-            time.sleep(0.0005)
+            time.sleep(0.001)
             continue #Don't bother with other stuff!
         if fill_me is None: #Poison pill. Quit!
             break
@@ -434,7 +441,7 @@ def projection_child_process(
                 try: #Now get a pending accumulation buffer
                     project_me = accumulation_buffer_input_queue.get_nowait()
                 except Queue.Empty: #Nothing pending. Keep trying.
-                    time.sleep(0.0005)
+                    time.sleep(0.001)
                     continue
                 if project_me is None: #Poison pill. Quit!
                     break
@@ -529,33 +536,7 @@ class Display:
         self.switch_buffers(0)
         self.convert_to_8_bit()
 
-        self.window = pyglet.window.Window(
-            self.image.width, self.image.height,
-            caption='Display', resizable=False)
-        self.image_scale = 1
-        self.image_x, self.image_y = 0, 0
-        @self.window.event
-        def on_draw():
-            self.window.clear()
-            self.image.blit(
-                x=self.image_x, y=self.image_y,
-                height=int(self.image.height * self.image_scale),
-                width=int(self.image.width * self.image_scale))
-
-        """
-        We don't want 'escape' or 'quit' to quit the pyglet
-        application, just withdraw it. The parent application should
-        control when pyglet quits.
-        """
-        @self.window.event
-        def on_key_press(symbol, modifiers):
-            self.window.set_visible(False)
-            if symbol == pyglet.window.key.ESCAPE:
-                return pyglet.event.EVENT_HANDLED
-        @self.window.event
-        def on_close():
-            self.window.set_visible(False)
-            return pyglet.event.EVENT_HANDLED
+        self.make_window()
 
         update_interval_seconds = 0.025
         pyglet.clock.schedule_interval(self.update, update_interval_seconds)
@@ -586,6 +567,73 @@ class Display:
             self.switch_buffers(switch_to_me)
             self.convert_to_8_bit()
         return None
+
+    def make_window(self):
+        screen_width, screen_height = self._get_screen_dimensions()
+
+        self.window = pyglet.window.Window(
+            min(screen_width//2, screen_height),
+            min(screen_width//2, screen_height),
+            caption='Display', resizable=True)
+        self.default_image_scale = min(
+            (screen_width//2) * 1.0 / self.image.width,
+            screen_height * 1.0 / self.image.height)
+        self.image_scale = self.default_image_scale
+        self.image_x, self.image_y = 0, 0
+        @self.window.event
+        def on_draw():
+            self.window.clear()
+            self.image.blit(
+                x=self.image_x, y=self.image_y,
+                height=int(self.image.height * self.image_scale),
+                width=int(self.image.width * self.image_scale))
+
+        """
+        Allow the user to pan and zoom the image
+        """
+        @self.window.event
+        def on_mouse_drag(x, y, dx, dy, buttons, modifiers):
+            if buttons == pyglet.window.mouse.LEFT:
+                self.image_x += dx
+                self.image_y += dy
+
+        @self.window.event
+        def on_mouse_scroll(x, y, scroll_x, scroll_y):
+            self.image_scale *= 1.2**(scroll_y)
+            if self.image_scale < 0.1:
+                self.image_scale = 0.1
+            if self.image_scale > 100:
+                self.image_scale = 100
+        
+        @self.window.event
+        def on_mouse_release(x, y, button, modifiers):
+            self.last_mouse_release = (x, y, button, clock())
+
+        @self.window.event
+        def on_mouse_press(x, y, button, modifiers):
+            if hasattr(self, 'last_mouse_release'):
+                if (x, y, button) == self.last_mouse_release[:-1]:
+                    """Same place, same button"""
+                    if clock() - self.last_mouse_release[-1] < 0.2:
+                        """We got ourselves a double-click"""
+                        self.image_scale = self.default_image_scale
+                        self.image_x = 0
+                        self.image_y = 0
+            
+        """
+        We don't want 'escape' or 'quit' to quit the pyglet
+        application, just withdraw it. The parent application should
+        control when pyglet quits.
+        """
+        @self.window.event
+        def on_key_press(symbol, modifiers):
+            if symbol == pyglet.window.key.ESCAPE:
+                self.window.set_visible(False)
+                return pyglet.event.EVENT_HANDLED
+        @self.window.event
+        def on_close():
+            self.window.set_visible(False)
+            return pyglet.event.EVENT_HANDLED
 
     def execute_external_command(self):
         """
@@ -744,6 +792,12 @@ class Display:
         self.lut[:] = self._lut_intermediate.view(np.uint8)[::2]
         return None
 
+    def _get_screen_dimensions(self):
+        plat = pyglet.window.Platform()
+        disp = plat.get_default_display()
+        screen = disp.get_default_screen()
+        return screen.width, screen.height
+
 class Data_Pipeline_File_Saving:
     def __init__(
         self,
@@ -791,7 +845,7 @@ def file_saving_child_process(
         try:
             permission_slip = input_queue.get_nowait()
         except Queue.Empty:
-            time.sleep(0.0005)
+            time.sleep(0.001)
             continue
         if permission_slip is None:
             break
@@ -821,15 +875,17 @@ if __name__ == '__main__':
 
     idp = Image_Data_Pipeline(
         num_buffers=5,
-        buffer_shape=(100, 2048, 2060))
+        buffer_shape=(10, 2048, 2060))
     idp.camera.commands.send(
         ('apply_settings',
          {'trigger': 'auto trigger',
           'region_of_interest': (-1, -1, 10000, 10000),
           'exposure_time_microseconds': 10000}))
+    idp.set_display_intensity_scaling(scaling='autoscale')
     print idp.camera.commands.recv()
     while True:
         try:
+            print idp.check_children()
             idp.collect_data_buffers()
             idp.load_data_buffers(len(idp.idle_data_buffers))
             raw_input('Press Enter to continue...')

@@ -596,14 +596,35 @@ class Display:
             if buttons == pyglet.window.mouse.LEFT:
                 self.image_x += dx
                 self.image_y += dy
+            self._enforce_panning_limits()
 
         @self.window.event
         def on_mouse_scroll(x, y, scroll_x, scroll_y):
-            self.image_scale *= 1.2**(scroll_y)
-            if self.image_scale < 0.1:
-                self.image_scale = 0.1
-            if self.image_scale > 100:
-                self.image_scale = 100
+            old_image_scale = self.image_scale
+            self.image_scale *= 1.3**(scroll_y)
+            """
+            No sense letting the user make the image underfill the window
+            """
+            while (self.image.width * self.image_scale < self.window.width and
+                   self.image.height * self.image_scale < self.window.height):
+                self.image_scale = min(
+                    self.window.width * 1.0 / self.image.width,
+                    self.window.height * 1.0 / self.image.height)
+            """
+            Might as well set some sane zoom limits, too.
+            """
+            if self.image_scale < 0.01:
+                self.image_scale = 0.01
+            if self.image_scale > 300:
+                self.image_scale = 300
+            """
+            Center the origin of the zoom on the mouse coordinate.
+            This was kinda thinky to figure out, don't fuck with this lightly.
+            """
+            zoom = self.image_scale * 1.0 / old_image_scale
+            self.image_x = self.image_x * zoom + x * (1 - zoom)
+            self.image_y = self.image_y * zoom + y * (1 - zoom)
+            self._enforce_panning_limits()
         
         @self.window.event
         def on_mouse_release(x, y, button, modifiers):
@@ -619,7 +640,10 @@ class Display:
                         self.image_scale = self.default_image_scale
                         self.image_x = 0
                         self.image_y = 0
-            
+                        w, h = self._get_screen_dimensions()
+                        edge_length = min(w//2, h)
+                        self.window.width = edge_length
+                        self.window.height = edge_length            
         """
         We don't want 'escape' or 'quit' to quit the pyglet
         application, just withdraw it. The parent application should
@@ -797,6 +821,21 @@ class Display:
         disp = plat.get_default_display()
         screen = disp.get_default_screen()
         return screen.width, screen.height
+
+    def _enforce_panning_limits(self):
+        if self.image_x < (self.window.width -
+                           self.image.width*self.image_scale):
+            self.image_x = (self.window.width -
+                            self.image.width*self.image_scale)
+        if self.image_y < (self.window.height -
+                           self.image.height*self.image_scale):
+            self.image_y = (self.window.height -
+                            self.image.height*self.image_scale)
+        if self.image_x > 0:
+            self.image_x = 0
+        if self.image_y > 0:
+            self.image_y = 0
+        return None
 
 class Data_Pipeline_File_Saving:
     def __init__(

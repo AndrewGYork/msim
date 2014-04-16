@@ -10,7 +10,7 @@ import logging
 class ParentFrame(wx.Frame):
     def __init__(self, parent, id, title):
         wx.Frame.__init__(
-            self, parent, id, title, wx.DefaultPosition, (300, 200))
+            self, parent, id, title, wx.DefaultPosition, (450, 200))
         self.panel = wx.Panel(self, -1)
 
         vbox = wx.BoxSizer(wx.VERTICAL)
@@ -22,19 +22,22 @@ class ParentFrame(wx.Frame):
         self.floatspin.SetFormat("%f")
         self.floatspin.SetDigits(2)
 
-        btn1 = wx.Button(self.panel, 7, 'Adjust')
-        btn2 = wx.Button(self.panel, 8, 'Snap')
-        btn3 = wx.Button(self.panel, 9, 'Close')
+        btnAdjust = wx.Button(self.panel, 7, 'Adjust')
+        btnSnap = wx.Button(self.panel, 8, 'Snap')
+        btnClose = wx.Button(self.panel, 9, 'Close')
+        btnCharacterize = wx.Button(self.panel, 10, 'Characterize')
 
         self.Bind(wx.EVT_CLOSE, self.OnClose)
-        btn1.Bind(wx.EVT_BUTTON, self.on_adjust)
-        btn2.Bind(wx.EVT_BUTTON, self.on_snap)
-        btn3.Bind(wx.EVT_BUTTON, self.OnClose)
+        btnAdjust.Bind(wx.EVT_BUTTON, self.on_adjust)
+        btnSnap.Bind(wx.EVT_BUTTON, self.on_snap)
+        btnCharacterize.Bind(wx.EVT_BUTTON, self.on_characterize)
+        btnClose.Bind(wx.EVT_BUTTON, self.OnClose)
         
         vbox.Add(self.floatspin, 1, wx.ALIGN_CENTRE | wx.ALL, 25)
-        hbox.Add(btn1, 1, 10)
-        hbox.Add(btn2, 1, 10)
-        hbox.Add(btn3, 1, 10)
+        hbox.Add(btnAdjust, 1, 10)
+        hbox.Add(btnSnap, 1, 10)
+        hbox.Add(btnClose, 1, 10)
+        hbox.Add(btnCharacterize, 1, 10)
         vbox.Add(hbox, 0, wx.ALIGN_CENTRE | wx.ALL, 10)
         self.panel.SetSizer(vbox)
 
@@ -66,7 +69,7 @@ class ParentFrame(wx.Frame):
         self.idp = Image_Data_Pipeline(
             num_buffers=5,
             buffer_shape=(1, 2048, 2060)) ##256 or 2048, 2060
-        self.exposure_time_microseconds = 15000
+        self.exposure_time_microseconds = 20000
         """
         Rep rate of camera is dictated by rep rate of the wheel. Exposure
         time of the camera has to be 20 microseconds shorter than the
@@ -86,6 +89,7 @@ class ParentFrame(wx.Frame):
         print self.idp.get_display_intensity_scaling()
 
         self.pending_snaps = 0
+        self.saved_files = 0
 
         self.scale_frame_open = False
 
@@ -114,7 +118,9 @@ class ParentFrame(wx.Frame):
         self.idp.collect_data_buffers()
         if len(self.idp.idle_data_buffers) > 4:
             self.pending_snaps += 1
-            self.idp.load_data_buffers(1)
+            self.idp.load_data_buffers(
+                1, [{'outfile':'image_%06i.tif'%self.saved_files}])
+            self.saved_files += 1
         else:
             print "Not enough buffers available"
         if self.scale_frame_open: #Eventually shift responsiblilty to a timer
@@ -124,6 +130,10 @@ class ParentFrame(wx.Frame):
             self.child.max.SetValue(
                 str(display_scaling[2]))
         
+    def on_characterize(self, event):
+        self.murricle_starts = []
+        for i in range(5):
+            self.murricle_starts.append(self.start_point_murricle - i)
     
     def OnClose(self, event):
         self.daq_timer.Stop()
@@ -140,42 +150,55 @@ class ParentFrame(wx.Frame):
         which_facet = 0
         clean_me = False
         while self.pending_snaps > 0:
-            start_point = self.daq.perpendicular_facet_times[which_facet]
+            start_point_camera = self.daq.perpendicular_facet_times[which_facet]
+            start_point_laser = self.daq.perpendicular_facet_times[
+                which_facet + 18]
+            self.start_point_murricle = start_point_camera + 5992
+
             print "which facet"
-            print which_facet + 15
+            print which_facet + 18
+            print "camera"
+            print start_point_camera
             print
+            print "laser"
+            print start_point_laser
+            print
+            print "wiggle"
+            print start_point_camera + 6058
             print "daq point"
-            print self.daq.perpendicular_facet_times[which_facet+15]
-            print
-            print "last facet entry"
-            print self.daq.perpendicular_facet_times[-1]
+            print self.daq.perpendicular_facet_times[which_facet+18]
+            
             """
             Random "useful" code sneepet:
             start_point += np.ceil((self.exposure_time_microseconds + 20)
                                    * self.daq.rate * 1e-6)
 
-            Trigger the camera:
-            -10 is for camera jitter
+            Trigger the camera
             """
-            self.daq.voltage[start_point - 10 : start_point + 200, 4] = 3
+            self.daq.voltage[
+                start_point_camera: start_point_camera + 200, 4] = 3
             """
             Trigger the laser
             """
-            self.daq.voltage[start_point, 6] = 10
-            self.daq.voltage[start_point, 7] = 10
+            self.daq.voltage[start_point_laser, 6] = 10
+            self.daq.voltage[start_point_laser, 7] = 10
+            
             """
             Wiggle the murrrrcle
             """
-            num_periods = 3
-            daq_timepoints_per_period = 100
-            amplitude_volts = 0.01
+            num_periods = 2
+            daq_timepoints_per_period = 500
+            amplitude_volts = 0.1
             x = np.linspace(
                 0, 2*np.pi*num_periods, num_periods * daq_timepoints_per_period)
-            self.daq.voltage[start_point + 5000:start_point + 5000 + x.size, 3
-                             ] = amplitude_volts * np.sin(x)
+            self.daq.voltage[
+                self.start_point_murricle:self.start_point_murricle + x.size,
+                3] = amplitude_volts * np.sin(x)
 
             
-            which_facet += 30 #One wheel rotation maps onto one camera exposure
+            which_facet += np.ceil(self.exposure_time_microseconds / 666)
+            ##exposure time * (1 point/ 2us) * (1 facet/ 333 points)
+            ## only works for 
             self.pending_snaps -= 1
             clean_me = True
             print "OH SNAP!"

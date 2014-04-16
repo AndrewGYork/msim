@@ -30,14 +30,15 @@ def camera_child_process(
     """
     buffer_size = np.prod(buffer_shape)
     import pco
-    camera = pco.Edge()
-    camera.apply_settings(trigger='external trigger/software exposure control')
+    camera = pco.Edge(pco_edge_type='4.2') #Change this if you're using a 5.5
+    camera.apply_settings(trigger='auto trigger')
     camera.get_shutter_mode()
     camera.get_settings(verbose=False)
     camera.arm(num_buffers=3)
     camera._prepare_to_record_to_memory()
     preframes = 3
     status = 'Normal'
+    timeout = 0
     while True:
         if commands.poll():
             cmd, args = commands.recv()
@@ -59,35 +60,54 @@ def camera_child_process(
                 commands.send(None)
             elif cmd == 'get_preframes':
                 commands.send(preframes)
-            continue
+            elif cmd == 'set_preframes':
+                preframes = args['preframes']
+                commands.send(preframes)
+            elif cmd == 'get_timeout':
+                commands.send(timeout)
+            elif cmd == 'set_timeout':
+                timeout = args['timeout']
+                commands.send(timeout)
+            continue #ignore commands we don't recognize. Bad idea?
         try:
-            process_me = input_queue.get_nowait()
+            permission_slip = input_queue.get_nowait()
         except Queue.Empty:
-            time.sleep(0.0005)
+            time.sleep(0.001)
             continue
-        if process_me is None:
+        if permission_slip is None:
             break #We're done
         else:
+            time_received = clock()
             """Fill the buffer with something"""
+            process_me = permission_slip['which_buffer']
             info("start buffer %i"%(process_me))
             with data_buffers[process_me].get_lock():
                 a = np.frombuffer(data_buffers[process_me].get_obj(),
                                   dtype=np.uint16)[:buffer_size
                                                    ].reshape(buffer_shape)
-                try:
-                    camera.record_to_memory(
-                        num_images=a.shape[0] + preframes,
-                        preframes=preframes,
-                        out=a)
-                except pco.TimeoutError as e:
-                    info('TimeoutError, %i acquired'%(e.num_acquired))
-                    status = 'TimeoutError'
-                except pco.DMAError:
-                    info('DMAError')
-                    status = 'DMAError'
-                else:
-                    status = 'Normal'
+                while True:
+                    info('Start acquiring:%06f'%clock())
+                    try:
+                        camera.record_to_memory(
+                            num_images=a.shape[0] + preframes,
+                            preframes=preframes,
+                            out=a)
+                    except pco.TimeoutError as e:
+                        info('TimeoutError, %i acquired'%(e.num_acquired))
+                        status = 'TimeoutError'
+                        time_elapsed = clock() - time_received
+                        if time_elapsed > timeout:
+                            raise UserWarning(
+                                "No trigger received, timeout exceeded")
+                    except pco.DMAError:
+                        info('DMAError')
+                        status = 'DMAError'
+                        break
+                    else:
+                        info('Done acquiring:%06f'%clock())
+                        status = 'Normal'
+                        break
             info("end buffer %i"%(process_me))
-            output_queue.put(process_me)
+            output_queue.put(permission_slip)
     camera.close()
     return None

@@ -172,7 +172,7 @@ class Image_Data_Pipeline:
         args = locals()
         args.pop('self')
         self.display.commands.send(('set_intensity_scaling', args))
-        return None
+        return self.display.commands.recv()
 
     def get_display_intensity_scaling(self):
         return self.display.get_intensity_scaling()
@@ -667,7 +667,8 @@ class Display:
         """
         cmd, args = self.commands.recv()
         if cmd == 'set_intensity_scaling':
-            self.set_intensity_scaling(**args)
+            response = self.set_intensity_scaling(**args)
+            self.commands.send(response)
         elif cmd == 'get_intensity_scaling':
             self.commands.send((self.intensity_scaling,
                                 self.display_min,
@@ -795,7 +796,7 @@ class Display:
             raise UserWarning("Scaling not recognized:, %s"%(repr(scaling)))
         if hasattr(self, 'display_data_16'):
             self.convert_to_8_bit()
-        return None
+        return scaling, display_min, display_max
     
     def _make_linear_lookup_table(self):
         """
@@ -914,7 +915,7 @@ if __name__ == '__main__':
 
     idp = Image_Data_Pipeline(
         num_buffers=5,
-        buffer_shape=(10, 2048, 2060))
+        buffer_shape=(100, 2048, 2060))
     idp.camera.commands.send(
         ('apply_settings',
          {'trigger': 'auto trigger',

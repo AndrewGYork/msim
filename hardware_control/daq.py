@@ -32,10 +32,9 @@ class DAQ_with_queue:
         """
         Expected use pattern:
          Initialize
-         Add voltages to the queue on the fly
-         Any time the queue is empty, voltages return to (safe?) defaults
-         Stop 'playing'
-         Close.
+         Child process plays default voltages on repeat unless told otherwise
+         send_voltage() and play_voltage() as desired
+         Close
         """
         self.num_channels = num_channels
         self.rate = rate
@@ -62,9 +61,7 @@ class DAQ_with_queue:
         into write_length pieces, and spits it ot the child, padded as
         neccesary.
         """
-        ##FIXME: Force voltage to begin and end on safe voltages
         ##FIXME: Leave certain channels immutable
-        ##FIXME: Default voltages AND resting voltages
         ##FIXME: Delay function for murrrrcle
         assert voltage.shape[1] == self.num_channels
         timepoints = voltage.shape[0]
@@ -145,9 +142,6 @@ def DAQ_child_process(
                 daq.set_voltage(write_this_signal[which_write_length, :, :])
                 daq.write_voltage(verbose=False)
     info("Stopping scan")
-    daq.write_voltage(write_default=True)
-    daq.write_voltage(write_default=True)
-    daq.stop_scan()
     daq.close()
 
 class DAQ:
@@ -166,6 +160,7 @@ class DAQ:
                 (write_length, num_channels), dtype=np.float64)
         else:
             assert default_voltage.shape == (write_length, num_channels)
+            self.default_voltage = default_voltage
         self.voltage = self.default_voltage.copy()
         self.write_length = write_length
         self.num_channels = num_channels
@@ -187,8 +182,21 @@ class DAQ:
         self.set_rate(rate)
         self.set_regeneration(regenerate)
         self.set_output_buffer_size(2 * write_length)
-        self.write_voltage()
-        self.write_voltage()
+                  
+        """
+        We need to fill up the buffer anyway, so we can call
+        self.scan() without crashing immediately. Might as well use
+        these first two writes to smoothly ramp from zero volts to the
+        default voltages:
+        """
+        for start, finish in ((0, 0.5), (0.5, 1)):
+            for chan in range(self.num_channels):
+                self.voltage[:, chan] = np.linspace(
+                    start * self.default_voltage[0, chan],
+                    finish * self.default_voltage[0, chan],
+                    self.write_length)
+            self.write_voltage()
+        self.voltage[:] = self.default_voltage
         return None
 
     def set_rate(self, rate):
@@ -232,13 +240,6 @@ class DAQ:
         if verbose:
             print "Voltage set."
         return None
-    
-    def set_default_voltage(self, default_voltage, verbose=False):
-        assert self.default_voltage.shape == default_voltage.shape
-        self.default_voltage[:] = default_voltage
-        if verbose:
-            print "Default voltage set."
-        return None
 
     def write_voltage(self, write_default=False, verbose=False):
         if write_default:
@@ -271,8 +272,39 @@ class DAQ:
         print "Done scanning"
         return None
 
-    def close(self):
+    def clear(self):
         DAQmxErrChk(api.DAQmxClearTask(self.taskHandle))
+        return None
+
+    def close(self):
+        """
+        If we just call "clear", the DAQ voltages stop at a random
+        point, and this is pretty lame. Best to write a rampdown from
+        default voltages, and then some zeros, so we're guaranteed to
+        stop at zero output voltage.
+
+        First, write the rampdown:
+        """
+        for start, finish in ((1, 0.5), (0.5, 0)):
+            print start
+            print finish
+            for chan in range(self.num_channels):
+                self.voltage[:, chan] = np.linspace(
+                    start * self.default_voltage[-1, chan],
+                    finish * self.default_voltage[-1, chan],
+                    self.write_length)
+            self.write_voltage(verbose=True)
+        """
+        Next, fill the output buffer with zeros:
+        """
+        self.voltage.fill(0)
+        for i in range(4): #Seriously? 4? Yeah, 4. WTF? I don't understand why.
+            self.write_voltage(verbose=True)
+        """
+        Now, we can stop the DAQ without drama:
+        """
+        self.stop_scan()
+        self.clear()
         return None
 
 def DAQmxErrChk(err_code):
@@ -291,132 +323,54 @@ if __name__ == '__main__':
     import logging
     logger = mp.log_to_stderr()
     logger.setLevel(logging.INFO)
+    
     """
     Test basic functionality of the DAQ object
     """
-##    daq = DAQ(
-##        rate=780000,
-##        write_length=1250)
-##    daq.scan(verbose=True)
-##    while True:
-##        try:
-##            daq.write_voltage()
-##        except KeyboardInterrupt:
-##            break
-##    """
-##    Test basic functionality of the 'DAQ_child_process' function
-##    """
-##    input_queue = mp.Queue()
-##    commands, child_commands = mp.Pipe()
-##    print "Press Ctrl-C to exit..."
-##    try:
-##        DAQ_child_process(commands, input_queue)
-##    except KeyboardInterrupt:
-##        pass
-##    print "Done."
-
-    """
-    Test basic functionality of the 'DAQ_with_queue' object
-    """
-    daq = DAQ_with_queue()
-    print "Waiting a bit..."
-    time.sleep(1)
-    print "Sending signal..."
-    sig = np.zeros((10000, 8), dtype=np.float64)
-    daq.send_voltage(sig, 'sig0')
-    daq.play_voltage('sig0')
-    print "Done sending."
-
-    print "Waiting a bit..."
-    time.sleep(1)
-    print "Sending several small signals..."
-    sig1 = 0.1 * np.ones((9000, 8), dtype=np.float64)
-    sig2 = 0.2 * np.ones((10000, 8), dtype=np.float64)
-    sig3 = 0.3 * np.ones((11000, 8), dtype=np.float64)
-    sig4 = 0.4 * np.ones((12000, 8), dtype=np.float64)
-    daq.send_voltage(sig1, 'sig1')
-    daq.send_voltage(sig2, 'sig2')
-    daq.send_voltage(sig3, 'sig3')
-    daq.send_voltage(sig4, 'sig4')
-    daq.play_voltage('sig1')
-    daq.play_voltage('sig2')
-    daq.play_voltage('sig3')
-    daq.play_voltage('sig4')
-    daq.play_voltage('sig0')
-    print "Done sending."
+    default_voltage = 1 * np.ones((1250, 8))
+    default_voltage[0:100, 0] = 2
+    daq = DAQ(
+        rate=1000,
+        write_length=default_voltage.shape[0],
+        num_channels=default_voltage.shape[1],
+        default_voltage=default_voltage)
+    daq.scan(verbose=True)
+    while True:
+        try:
+            daq.write_voltage()
+        except KeyboardInterrupt:
+            break
+    print "Closing daq..."
     daq.close()
     raw_input()
-    
-##    print "Waiting a bit..."
-##    time.sleep(2)
-##    print "Sending a too big signal..."
-##    sig = 0.5 * np.ones((25000, 8), dtype=np.float64)
-##    daq.send_voltage(sig)
-##    print "Done sending."
-##    
-##    print "Waiting a bit..."
-##    time.sleep(2)
-##    print "Sending signal..."
-##    sig = 0 * np.ones((10000, 8), dtype=np.float64)
-##    daq.send_voltage(sig)
-##    print "Done sending."
-##
+
 ##    """
 ##    Test basic functionality of the 'DAQ_with_queue' object
 ##    """
 ##    daq = DAQ_with_queue()
 ##    print "Waiting a bit..."
-##    time.sleep(2)
+##    time.sleep(1)
 ##    print "Sending signal..."
-##    sig = np.ones((10000, 8), dtype=np.float64)
-##    daq.send_voltage(sig)
+##    sig = np.zeros((10000, 8), dtype=np.float64)
+##    daq.send_voltage(sig, 'sig0')
+##    daq.play_voltage('sig0')
 ##    print "Done sending."
-##    
-##    for i in range(10):
-##        try:
-##            print "Sending new signals"
-##            print i 
-##            sig1= 4 * (np.random.random_sample((np.random.randint(1,60000), 8))) - 2
-##            sig2= 4 * (np.random.random_sample((np.random.randint(1,60000), 8))) - 2
-##            daq.send_voltage(sig1)
-##            daq.send_voltage(sig2)
-##            time.sleep(4*np.random.random_sample())
-##        except KeyboardInterrupt:
-##            break
+##    print "Waiting a bit..."
+##    time.sleep(1)
+##    print "Sending several small signals..."
+##    sig1 = 0.1 * np.ones((9000, 8), dtype=np.float64)
+##    sig2 = 0.2 * np.ones((10000, 8), dtype=np.float64)
+##    sig3 = 0.3 * np.ones((11000, 8), dtype=np.float64)
+##    sig4 = 0.4 * np.ones((12000, 8), dtype=np.float64)
+##    daq.send_voltage(sig1, 'sig1')
+##    daq.send_voltage(sig2, 'sig2')
+##    daq.send_voltage(sig3, 'sig3')
+##    daq.send_voltage(sig4, 'sig4')
+##    daq.play_voltage('sig1')
+##    daq.play_voltage('sig2')
+##    daq.play_voltage('sig3')
+##    daq.play_voltage('sig4')
+##    daq.play_voltage('sig0')
+##    print "Done sending."
 ##    daq.close()
-##    
-##            
-##    """
-##    Test basic functionality of the 'DAQ_with_queue' object
-##    """
-##
-##    
-##    duration = 1
-##    cycles_per_second = 2
-##    points_per_cycle = 100000
-##    rate = points_per_cycle * cycles_per_second
-##    daq = DAQ_with_queue(rate=rate)
-##    for i in range(duration):
-##        sig = np.zeros((rate, 8), dtype=np.float64)
-##        sig[:,0] = np.sin(np.linspace( 0, 2 * np.pi * cycles_per_second, rate))
-##        daq.send_voltage(sig)
-##        
-##    time.sleep(0.5)
-##    daq.close()
-##
-##    raw_input()
-##    
-##
-##    duration = 1
-##    cycles_per_second = 440
-##    points_per_cycle = 500
-##    rate = points_per_cycle * cycles_per_second
-##    rate = 200000
-##    daq = DAQ_with_queue(rate=rate)
-##    for i in range(duration):
-##        sig = np.zeros((rate, 8), dtype=np.float64)
-##        sig[:,5] = np.sin(np.linspace( 0, 2 * np.pi * cycles_per_second, rate))
-##        daq.send_voltage(sig)
-##
-##    playtone(440,1)
 ##    raw_input()

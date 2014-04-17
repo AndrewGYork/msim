@@ -104,6 +104,14 @@ class DAQ_with_queue:
         self.commands.send(('play_voltage', {'name': voltage_name}))
         return None
 
+    def roll_voltage(self, voltage_name='voltage', channel=0, roll_pixels=0):
+        self.commands.send((
+            'roll_voltage',
+            {'name': voltage_name,
+             'channel': channel,
+             'pixels_to_roll': roll_pixels}))
+        return None
+
     def get_pad_points(self, voltage_name):
         """
         Returns how many timepoints were used to pad a give waveform
@@ -147,6 +155,28 @@ def DAQ_child_process(
                 info("Playing signal:" + args['name'])
                 write_this_signal = loaded_signals[args['name']]
                 write_default = False
+            elif cmd == 'roll_voltage':
+                info("Rolling signal:" + args['name'])
+                signal_in_question = loaded_signals[args['name']]
+                channel_to_roll = args['channel']
+                pixels_to_roll = args['pixels_to_roll']
+                signal_to_roll = signal_in_question.reshape(
+                    signal_in_question.shape[0] *
+                    signal_in_question.shape[1],
+                    signal_in_question.shape[2])
+                if pixels_to_roll > 0:
+                    signal_to_roll[pixels_to_roll:, channel_to_roll] = (
+                        signal_to_roll[:-1 * pixels_to_roll, channel_to_roll])
+                    signal_to_roll[:pixels_to_roll, channel_to_roll] = 0
+                elif pixels_to_roll < 0:
+                    signal_to_roll[:pixels_to_roll, channel_to_roll] = (
+                        signal_to_roll[-pixels_to_roll:, channel_to_roll])
+                    signal_to_roll[pixels_to_roll:, channel_to_roll] = 0
+                loaded_signals[args['name']] = signal_to_roll.reshape(
+                    signal_in_question.shape[0],
+                    signal_in_question.shape[1],
+                    signal_in_question.shape[2])
+                
             elif cmd == 'quit':
                 break
 
@@ -343,53 +373,73 @@ if __name__ == '__main__':
     logger = mp.log_to_stderr()
     logger.setLevel(logging.INFO)
     
-    """
-    Test basic functionality of the DAQ object
-    """
-    default_voltage = 0.1 * np.ones((1250, 8))
-    default_voltage[0:100, 0] = 2
-    daq = DAQ(
-        rate=10000,
-        write_length=default_voltage.shape[0],
-        num_channels=default_voltage.shape[1],
-        default_voltage=default_voltage)
-    daq.scan(verbose=True)
-    while True:
-        try:
-            daq.write_voltage()
-        except KeyboardInterrupt:
-            break
-    print "Closing daq..."
-    daq.close()
-    raw_input("Hit Enter to test the DAQ_with_queue object...")
+##    """
+##    Test basic functionality of the DAQ object
+##    """
+##    default_voltage = 0.1 * np.ones((1250, 8))
+##    default_voltage[0:100, 0] = 0.2
+##    daq = DAQ(
+##        rate=10000,
+##        write_length=default_voltage.shape[0],
+##        num_channels=default_voltage.shape[1],
+##        default_voltage=default_voltage)
+##    daq.scan(verbose=True)
+##    while True:
+##        try:
+##            daq.write_voltage()
+##        except KeyboardInterrupt:
+##            break
+##    print "Closing daq..."
+##    daq.close()
+##    raw_input("Hit Enter to test the DAQ_with_queue object...")
 
-    """
-    Test basic functionality of the 'DAQ_with_queue' object
-    """
-    daq = DAQ_with_queue()
+
+    daq = DAQ_with_queue(
+        num_channels=8,
+        num_immutable_channels=1,)
     print "Waiting a bit..."
     time.sleep(1)
     print "Sending signal..."
-    sig = np.zeros((10000, 8), dtype=np.float64)
+    sig = np.zeros((10000, 7), dtype=np.float64)
+    sig[4500:5500, 0] = 1
+    sig[4500:5500, 1] = 1
     daq.send_voltage(sig, 'sig0')
     daq.play_voltage('sig0')
-    print "Done sending."
-    print "Waiting a bit..."
-    time.sleep(1)
-    print "Sending several small signals..."
-    sig1 = 0.1 * np.ones((9000, 8), dtype=np.float64)
-    sig2 = 0.2 * np.ones((10000, 8), dtype=np.float64)
-    sig3 = 0.3 * np.ones((11000, 8), dtype=np.float64)
-    sig4 = 0.4 * np.ones((12000, 8), dtype=np.float64)
-    daq.send_voltage(sig1, 'sig1')
-    daq.send_voltage(sig2, 'sig2')
-    daq.send_voltage(sig3, 'sig3')
-    daq.send_voltage(sig4, 'sig4')
-    daq.play_voltage('sig1')
-    daq.play_voltage('sig2')
-    daq.play_voltage('sig3')
-    daq.play_voltage('sig4')
+    time.sleep(0.5)
+    daq.roll_voltage(voltage_name='sig0', channel=0, roll_pixels=0)
     daq.play_voltage('sig0')
     print "Done sending."
     daq.close()
-    raw_input()
+
+##    """
+##    Test basic functionality of the 'DAQ_with_queue' object
+##    """
+##    daq = DAQ_with_queue(
+##        num_channels=8,
+##        num_immutable_channels=1,)
+##    print "Waiting a bit..."
+##    time.sleep(1)
+##    print "Sending signal..."
+##    sig = np.zeros((10000, 7), dtype=np.float64)
+##    daq.send_voltage(sig, 'sig0')
+##    daq.play_voltage('sig0')
+##    print "Done sending."
+##    print "Waiting a bit..."
+##    time.sleep(1)
+##    print "Sending several small signals..."
+##    sig1 = 0.1 * np.ones((9000, 7), dtype=np.float64)
+##    sig2 = 0.2 * np.ones((10000, 7), dtype=np.float64)
+##    sig3 = 0.3 * np.ones((11000, 7), dtype=np.float64)
+##    sig4 = 0.4 * np.ones((12000, 7), dtype=np.float64)
+##    daq.send_voltage(sig1, 'sig1')
+##    daq.send_voltage(sig2, 'sig2')
+##    daq.send_voltage(sig3, 'sig3')
+##    daq.send_voltage(sig4, 'sig4')
+##    daq.play_voltage('sig1')
+##    daq.play_voltage('sig2')
+##    daq.play_voltage('sig3')
+##    daq.play_voltage('sig4')
+##    daq.play_voltage('sig0')
+##    print "Done sending."
+##    daq.close()
+##    raw_input()

@@ -72,7 +72,6 @@ class DAQ_with_queue:
         into write_length pieces, and spits it to the child, padded as
         neccesary.
         """
-        ##FIXME: Delay function for murrrrcle
         if voltage.shape[1] != self.num_mutable_channels:
             raise UserWarning(
                 "%i Mutable channels selected," +
@@ -102,6 +101,13 @@ class DAQ_with_queue:
 
     def play_voltage(self, voltage_name='voltage'):
         self.commands.send(('play_voltage', {'name': voltage_name}))
+        return None
+
+    def set_default_voltage(
+        self, voltage, channel, voltage_name='default'):
+        self.commands.send(('set_default_voltage', {'name': voltage_name,
+                                                    'channel': channel}))
+        self.input_queue.put((voltage_name, voltage))
         return None
 
     def roll_voltage(self, voltage_name='voltage', channel=0, roll_pixels=0):
@@ -139,6 +145,7 @@ def DAQ_child_process(
               default_voltage=default_voltage,
               rate=rate,
               write_length=write_length)
+    num_mutable_channels = num_channels - num_immutable_channels
     daq.scan()
     while True:
         write_default = True
@@ -149,12 +156,34 @@ def DAQ_child_process(
                 name = args['name']
                 queue_name, signal = input_queue.get()
                 assert name == queue_name
+                assert signal.shape[2] == num_mutable_channels
                 loaded_signals[name] = signal
                 continue #Too fragile? How long does it take to load input?
             elif cmd == 'play_voltage':
                 info("Playing signal:" + args['name'])
                 write_this_signal = loaded_signals[args['name']]
                 write_default = False
+            elif cmd == 'set_default_voltage':
+                name, channel = args['name'], args['channel']
+                info("Setting new default voltage" +
+                     " for channel %i: "%(channel) + name)
+                queue_name, new_default = input_queue.get()
+                assert name == queue_name
+                print new_default.shape
+                assert new_default.size == write_length
+                assert channel in range(num_mutable_channels)
+                """
+                Write the old defaults, then an interpolating linker,
+                then the new defaults:
+                """
+                daq.write_voltage(write_default=True) #Old defaults
+                daq.default_voltage[:, channel] = np.linspace(
+                    daq.default_voltage[-1, channel],
+                    new_default[0],
+                    write_length)
+                daq.write_voltage(write_default=True) #Linker
+                daq.default_voltage[:, channel] = new_default
+                daq.write_voltage(write_default=True) #New defaults
             elif cmd == 'roll_voltage':
                 info("Rolling signal:" + args['name'])
                 signal_in_question = loaded_signals[args['name']]
@@ -176,12 +205,11 @@ def DAQ_child_process(
                     signal_in_question.shape[0],
                     signal_in_question.shape[1],
                     signal_in_question.shape[2])
-                
             elif cmd == 'quit':
                 break
 
         if write_default:
-            daq.write_voltage(verbose=False, write_default=True)
+            daq.write_voltage(write_default=True)
         else:
             for which_write_length in range(write_this_signal.shape[0]):
                 """
@@ -189,7 +217,7 @@ def DAQ_child_process(
                 to leave the immutable channels alone, so we bypass
                 daq.set_voltage() and edit daq.voltage directly:
                 """
-                daq.voltage[:, :(num_channels - num_immutable_channels)
+                daq.voltage[:, :num_mutable_channels
                             ] = write_this_signal[which_write_length, :, :]
                 daq.write_voltage(verbose=False)
     info("Stopping scan")
@@ -409,7 +437,12 @@ if __name__ == '__main__':
     daq.roll_voltage(voltage_name='sig0', channel=0, roll_pixels=0)
     daq.play_voltage('sig0')
     print "Done sending."
+    time.sleep(1)
+    daq.set_default_voltage(voltage=np.ones((1, daq.write_length)),
+                            channel=1)
+    time.sleep(3)
     daq.close()
+    raw_input()
 
 ##    """
 ##    Test basic functionality of the 'DAQ_with_queue' object

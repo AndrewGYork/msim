@@ -77,6 +77,8 @@ class DAQ_with_queue:
                 "%i Mutable channels selected," +
                 " but this voltage has %i channels."%(
                     self.num_mutable_channels, voltage.shape[1]))
+        if voltage.min() < -10 or voltage.max() > 10:
+            raise UserWarning("Voltage must be between -10 and 10 V")
         timepoints = voltage.shape[0]
         closest_available_timepoints = int(
             self.write_length *
@@ -169,7 +171,6 @@ def DAQ_child_process(
                      " for channel %i: "%(channel) + name)
                 queue_name, new_default = input_queue.get()
                 assert name == queue_name
-                print new_default.shape
                 assert new_default.size == write_length
                 assert channel in range(num_mutable_channels)
                 """
@@ -186,13 +187,13 @@ def DAQ_child_process(
                 daq.write_voltage(write_default=True) #New defaults
             elif cmd == 'roll_voltage':
                 info("Rolling signal:" + args['name'])
-                signal_in_question = loaded_signals[args['name']]
+                signal = loaded_signals[args['name']]
                 channel_to_roll = args['channel']
                 pixels_to_roll = args['pixels_to_roll']
-                signal_to_roll = signal_in_question.reshape(
-                    signal_in_question.shape[0] *
-                    signal_in_question.shape[1],
-                    signal_in_question.shape[2])
+                signal_to_roll = signal.reshape(
+                    signal.shape[0] *
+                    signal.shape[1],
+                    signal.shape[2])
                 if pixels_to_roll > 0:
                     signal_to_roll[pixels_to_roll:, channel_to_roll] = (
                         signal_to_roll[:-1 * pixels_to_roll, channel_to_roll])
@@ -202,9 +203,9 @@ def DAQ_child_process(
                         signal_to_roll[-pixels_to_roll:, channel_to_roll])
                     signal_to_roll[pixels_to_roll:, channel_to_roll] = 0
                 loaded_signals[args['name']] = signal_to_roll.reshape(
-                    signal_in_question.shape[0],
-                    signal_in_question.shape[1],
-                    signal_in_question.shape[2])
+                    signal.shape[0],
+                    signal.shape[1],
+                    signal.shape[2])
             elif cmd == 'quit':
                 break
 

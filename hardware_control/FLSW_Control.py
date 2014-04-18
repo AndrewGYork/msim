@@ -1,3 +1,4 @@
+import os
 import time
 import numpy as np
 import wx
@@ -66,10 +67,176 @@ class ParentFrame(wx.Frame):
         logger = mp.log_to_stderr()
         logger.setLevel(logging.INFO)
 
+        self.initialize_image_data_pipeline()
+        self.initialize_daq()
+        self.initialize_snap()
+        self.initialize_characterize()
+
+    def OnAbout(self, e):
+        dlg = wx.MessageDialog( self, "The fastest motherfuckers in the West",
+                                "About Microscope Control", wx.OK)
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def OnScale(self, e):
+        try:
+            """
+            Does the scale frame already exist?
+            """
+            getattr(self.scale_frame, 'thisown')
+        except (NameError, AttributeError):
+            """
+            The scale frame doesn't exist yet. Make it!
+            """
+            self.scale_frame = IntensityScaleFrame(self)
+        self.scale_frame.Show(True)
+        self.scale_frame.Iconize(False)
+        self.scale_frame.Raise()
+
+    def on_adjust(self, event):
+        change_voltage_value = self.floatspin.GetValue()
+        change_voltage = np.zeros((self.daq.write_length), dtype=np.float64)
+        change_voltage[:] = change_voltage_value
+        self.daq.set_default_voltage(change_voltage, 3)
+
+    def on_snap(self, event):
+        print self.idp.check_children() #Eventually add this to a timer
+        self.idp.collect_data_buffers()
+        if len(self.idp.idle_data_buffers) > 0:
+            self.idp.load_data_buffers(
+                1, [{'outfile':'image_%06i.tif'%self.saved_files}])
+            self.daq.play_voltage('snap')
+            print "OH SNAP!"
+            self.saved_files += 1
+        else:
+            print "Not enough buffers available"
+##        if self.scale_frame_open: #Eventually shift responsiblilty to a timer
+##            display_scaling = self.idp.get_display_intensity_scaling()
+##            self.child.min.SetValue(
+##                str(display_scaling[1]))
+##            self.child.max.SetValue(
+##                str(display_scaling[2]))
+        
+    def on_characterize(self, event):
+        """
+        Send a buffer (save to file)
+        Play the 'characterize' waveform
+        Roll one channel of the 'characterize' signal
+        Repeat until the whooooole bottle
+        """
+        data_dir = os.path.join(os.getcwd(), 'characterization')
+        if not os.path.exists(data_dir):
+            os.mkdir(data_dir)
+        saved_files = 0
+        for i in range(self.characterization_points):
+            status = self.idp.check_children()
+            for k in sorted(status.keys()):
+                if not status[k]:
+                    print '*\n'*20
+                    print k, status[k]
+                    print '*\n'*20
+            while len(self.idp.idle_data_buffers) < 1:
+                self.idp.collect_data_buffers()
+            self.idp.load_data_buffers(
+                1, [{'outfile': os.path.join(
+                    data_dir, 'image_%06i.tif'%saved_files)}])
+            self.daq.play_voltage('characterize')
+            print "OH CHARACTERIZE!"
+            saved_files += 1
+            self.daq.roll_voltage(voltage_name='characterize',
+                                  channel=n2c['emission_scan'],
+                                  roll_pixels=-1)
+        return None
+   
+    def OnClose(self, event):
+        self.daq.close()
+        self.idp.close()
+        print "DAQ Closing"
+        self.Destroy()
+
+    def initialize_characterize(self):
+        """
+        Create the murrrcle signal up here. All we care about is how
+        many DAQ points long it is.
+        """
+        num_periods = 2
+        daq_timepoints_per_period = 500
+        amplitude_volts = 0.1
+        murrcle_signal = np.sin(np.linspace(
+            0, 2*np.pi*num_periods, num_periods * daq_timepoints_per_period))
+        self.characterization_points = murrcle_signal.size
+        if murrcle_signal.size < self.daq.write_length:
+            temp_signal = np.zeros(self.daq.write_length, dtype=np.float64)
+            temp_signal[:murrcle_signal.size] = murrcle_signal
+            murrcle_signal = temp_signal
+            del temp_signal
+
+        assert (self.exposure_time_microseconds >=
+                self.get_camera_rolling_time_microseconds())
+        delay_points = max(
+            murrcle_signal.shape[0], #Figure out the limiting factor
+            (1e-6 * self.get_camera_rolling_time_microseconds() *
+             self.daq.rate))
+        voltage = np.zeros(((delay_points +
+                             murrcle_signal.shape[0] +
+                             self.daq.perpendicular_facet_times[0]),
+                            self.daq.num_mutable_channels),
+                           dtype=np.float64)
+        """
+        Trigger the camera
+        """
+        voltage[:self.daq.write_length//4, n2c['camera']] = 3
+        """
+        Trigger the laser
+        """
+        print "daq write length", self.daq.write_length
+        print
+        print "delay points", delay_points
+        print
+        print 'perp time', self.daq.perpendicular_facet_times[0]
+        print
+        start_point_laser = (#Integer num of writes plus a perp facet time
+            self.daq.perpendicular_facet_times[0] +
+            self.daq.write_length * int(np.ceil(delay_points * 1.0 /
+                                                self.daq.write_length)))
+        print "start point laser", start_point_laser
+        print
+        voltage[start_point_laser, n2c['488']] = 10
+        voltage[start_point_laser, n2c['blanking']] = 10
+        """
+        Wiggle the murrrrcle
+        """ 
+        voltage[-murrcle_signal.size:, n2c['emission_scan']] = murrcle_signal
+        time.sleep(1)
+        print voltage.shape, voltage.dtype, voltage.min(), voltage.max()
+        self.daq.send_voltage(voltage, 'characterize')
+        return None
+    
+    def initialize_snap(self):
+        ##Assume full-frame camera operation, 10 ms roll time
+        roll_time = int(np.ceil(self.daq.rate * 0.01))
+        oh_snap_voltages = np.zeros(
+            (self.daq.write_length  + roll_time, self.daq.num_mutable_channels),
+            dtype=np.float64)
+        #Camera triggers at the start of a write
+        oh_snap_voltages[:self.daq.write_length//4, n2c['camera']] = 3
+        #AOTF fires on one perpendicular facet
+        start_point_laser = (#Integer num of writes plus a perp facet time
+            self.daq.perpendicular_facet_times[0] +
+            self.daq.write_length * int(roll_time * 1.0 /
+                                        self.daq.write_length))
+        oh_snap_voltages[start_point_laser, n2c['488']] = 10
+        oh_snap_voltages[start_point_laser, n2c['blanking']] = 10
+        time.sleep(1)
+        print oh_snap_voltages.shape
+        self.daq.send_voltage(oh_snap_voltages, 'snap')
+        return None
+
+    def initialize_image_data_pipeline(self):
         self.idp = Image_Data_Pipeline(
-            num_buffers=5,
+            num_buffers=15,
             buffer_shape=(1, 2048, 2060)) ##256 or 2048, 2060
-        self.exposure_time_microseconds = 20000
+        desired_exposure_time_microseconds = 20000
         """
         Rep rate of camera is dictated by rep rate of the wheel. Exposure
         time of the camera has to be 20 microseconds shorter than the
@@ -79,146 +246,40 @@ class ParentFrame(wx.Frame):
             ('apply_settings',
              {'trigger': 'external trigger/software exposure control',
               'region_of_interest': (-1, -1, 10000, 10000),##897, 1152
-              'exposure_time_microseconds': self.exposure_time_microseconds}))
-        print "Camera response:", self.idp.camera.commands.recv()
+              'exposure_time_microseconds': desired_exposure_time_microseconds}
+             ))
+        camera_response = self.idp.camera.commands.recv()
+        print "Camera response:", camera_response
+        (trigger_mode,
+         self.exposure_time_microseconds,
+         self.region_of_interest,
+         ) = camera_response
         self.idp.camera.commands.send(('set_timeout', {'timeout': 1}))
         print "Camera timeout:", self.idp.camera.commands.recv(), "s"
         self.idp.camera.commands.send(('set_preframes', {'preframes': 0}))
         print "Camera preframes:", self.idp.camera.commands.recv()
         self.idp.set_display_intensity_scaling(scaling='autoscale')
         print self.idp.get_display_intensity_scaling()
-
-        self.pending_snaps = 0
         self.saved_files = 0
 
-        self.scale_frame_open = False
-
-        self.initialize_daq()
-        
-        self.initialize_snap()
-
-        self.characterize_me = False
-        ##self.initialize_characterize()
-
-    def OnAbout(self, e):
-        dlg = wx.MessageDialog( self, "The fastest motherfuckers in the West",
-                                "About Microscope Control", wx.OK)
-        dlg.ShowModal() # Show it
-        dlg.Destroy() # finally destroy it when finished.
-
-    def OnScale(self, e):
-        if not self.scale_frame_open:
-            self.child = IntensityScaleFrame(self)
-            self.child.Show()
-            self.scale_frame_open = True
-
-    def on_adjust(self, event):
-        change_voltage_value = self.floatspin.GetValue()
-        change_voltage = np.zeros((self.daq.write_length), dtype=np.float64)
-        change_voltage[:] = change_voltage_value
-        self.daq.set_default_voltage(change_voltage, 2)
-
-    def on_snap(self, event):
-        print self.idp.check_children()
-        self.idp.collect_data_buffers()
-        if len(self.idp.idle_data_buffers) > 4:
-            self.pending_snaps += 1
-            self.idp.load_data_buffers(
-                1, [{'outfile':'image_%06i.tif'%self.saved_files}])
-            self.saved_files += 1
-        else:
-            print "Not enough buffers available"
-        if self.scale_frame_open: #Eventually shift responsiblilty to a timer
-            display_scaling = self.idp.get_display_intensity_scaling()
-            self.child.min.SetValue(
-                str(display_scaling[1]))
-            self.child.max.SetValue(
-                str(display_scaling[2]))
-        
-    def on_characterize(self, event):
-        self.characterize_me = True
-    
-    def OnClose(self, event):
-        self.daq_timer.Stop()
-        self.daq.close()
-        self.idp.close()
-        print "DAQ Closing"
-        self.Destroy()
-
-    def on_daq_timer(self, event):
-        
-        while self.pending_snaps > 0:
-            print "OH SNAP!"
-            self.daq.play_voltage(voltage_name='snap')
-            self.pending_snaps -= 1
-        if self.characterize_me:
-            print "characterized"
-            self.characterize_me = False
-
-    def initialize_characterize(self):
-        ##FIXME to use roll
-
-        start_point_camera = self.daq.perpendicular_facet_times[which_facet]
-        start_point_laser = self.daq.perpendicular_facet_times[
-                which_facet + 18]
-        self.start_point_murricle = start_point_camera + 5992
-        
+    def get_camera_rolling_time_microseconds(self):
         """
-        Wiggle the murrrrcle
+        The pco edge 4.2 allows an asymmetric region-of-interest, but
+        does this simply by acquiring a symmetric region-of-interest
+        and cropping the data, so the rolling time is still the same
+        as if you'd used a symmetric region of interest.
         """
-        num_periods = 2
-        daq_timepoints_per_period = 500
-        amplitude_volts = 0.1
-        x = np.linspace(
-            0, 2*np.pi*num_periods, num_periods * daq_timepoints_per_period)
-        self.daq.voltage[
-            self.start_point_murricle:self.start_point_murricle + x.size,
-            3] = amplitude_volts * np.sin(x)
-        pass
-    
-    def initialize_snap(self, snaps=1):
-        
-        oh_snap_voltages = np.zeros((self.daq.write_length, 6),
-                                        dtype=np.float64)
-        which_facet = 0
-        
-        while snaps > 0:
-            start_point_camera = self.daq.perpendicular_facet_times[which_facet]
-            start_point_laser = self.daq.perpendicular_facet_times[
-                which_facet + 18]
-            
-            """
-            Trigger the camera
-            """
-            oh_snap_voltages[start_point_camera: start_point_camera + 200, 4] = 3
+        num_lines = max(2*self.region_of_interest[3] - 2048,
+                        2048 - 2*(self.region_of_interest[1] - 1))
+        seconds_per_line = 0.01007 * 1.0 / 2048. #10 ms for the full field
+        return int(num_lines * seconds_per_line * 1e6)
 
-            """
-            Trigger the laser
-            """
-            oh_snap_voltages[start_point_laser, 0] = 10
-            oh_snap_voltages[start_point_laser, 1] = 10
-            
-            which_facet += np.ceil(self.exposure_time_microseconds / 666)
-            ##exposure time * (1 point/ 2us) * (1 facet/ 333 points)
-            ## only works for
-
-            snaps -= 1
-
-        self.daq.send_voltage(oh_snap_voltages, 'snap')
-        
     def initialize_daq(self):
         rotations_per_second = 150
         facets_per_rotation = 10
         points_per_second = 500000
         num_channels = 8
 
-        """
-        This logic assumes we can get away with an integer number of
-        triggers per write; if we end up using a mirror with an odd
-        number of sides, or if the mirror isn't perfectly regular, we
-        might have to always use an integer number of rotations per
-        write, not an integer number of triggers per write.
-        """
         triggers_per_rotation = 2
         triggers_per_second = triggers_per_rotation * rotations_per_second
         points_per_trigger = points_per_second * (1.0 / triggers_per_second)
@@ -229,84 +290,69 @@ class ParentFrame(wx.Frame):
         print points_per_trigger * triggers_per_rotation
         print "Desired points per facet:", points_per_facet
         points_per_facet = int(round(points_per_facet))
-        points_per_trigger = int(points_per_facet *
-                                 facets_per_rotation *
-                                 (1.0 / triggers_per_rotation))
+        points_per_trigger = int(points_per_facet * #Careful! (Odd-facet case)
+                                 facets_per_rotation * 1.0 /
+                                 triggers_per_rotation)
         print "Actual points per rotation:",
         print points_per_trigger * triggers_per_rotation
-        print "Actual points per facet:", (points_per_trigger *
-                                           triggers_per_rotation *
-                                           (1.0 / facets_per_rotation))
+        print "Actual points per facet:", points_per_facet
         print
         print "Desired rotations per second:", rotations_per_second
         rotations_per_second = (
             points_per_second *
             (1.0 / (points_per_trigger * triggers_per_rotation)))
         print "Actual rotations per second:", rotations_per_second
-        print 
-        points_per_write = points_per_second // 3
-        print "Desired write length:", points_per_write
-        rotations_per_write = points_per_write * 1.0 / (points_per_trigger *
-                                                        triggers_per_rotation)
-        rotations_per_write = int(round(rotations_per_write))
-        points_per_write = (points_per_trigger *
-                            triggers_per_rotation *
-                            rotations_per_write)
-        print "Actual write length:", points_per_write
-        print "Rotations per write:", rotations_per_write
-        triggers_per_write = triggers_per_rotation * rotations_per_write
-        print "Triggers per write:", triggers_per_write
+        points_per_rotation = points_per_trigger * triggers_per_rotation
+        print "Write length:", points_per_rotation
         print
         
-        wheel_signal = np.zeros(points_per_write, dtype=np.float64)
-        for i in range(triggers_per_write):
+        wheel_signal = np.zeros(points_per_rotation, dtype=np.float64)
+        for i in range(triggers_per_rotation):
             start = i * points_per_trigger
             stop = start + points_per_trigger // 2
             wheel_signal[start:stop] = 6
-        wheel_brake_signal = np.zeros(points_per_write, dtype=np.float64)
         
-        voltage = np.zeros((points_per_write, num_channels), dtype=np.float64)
-        voltage[:, 0] = 0 #laser
-        voltage[:, 1] = 0 #laser
-        voltage[:, 2] = 5 #focusing objective
-        voltage[:, 3] = 0 #murrrcle
-        voltage[:, 4] = 0 #camera trigger
-        voltage[:, 6] = wheel_brake_signal
-        voltage[:, 7] = wheel_signal
+        default_voltage = np.zeros(
+            (points_per_rotation, num_channels), dtype=np.float64)
 
-        self.daq = DAQ_with_queue(num_immutable_channels = 2,
-                                  default_voltage=voltage,
+        default_voltage[:, n2c['488']] = 0
+        default_voltage[:, n2c['561']] = 0
+        default_voltage[:, n2c['blanking']] = 0
+        default_voltage[:, n2c['objective']] = 5
+        default_voltage[:, n2c['excitation_scan']] = 0
+        default_voltage[:, n2c['emission_scan']] = 0
+        default_voltage[:, n2c['camera']] = 0
+        default_voltage[:, n2c['wheel']] = wheel_signal
+
+        self.daq = DAQ_with_queue(num_immutable_channels=1,
+                                  default_voltage=default_voltage,
                                   rate=points_per_second,
-                                  write_length=points_per_write)
-
+                                  write_length=points_per_rotation)
+        """
+        Positive lag raises first wheel reflection, lag=65 for 150 rps
+        Empirically determined!
+        """
+        perpendicular_lag = int(np.ceil((10404.0/rotations_per_second) - 5.0))
         self.daq.perpendicular_facet_times = []
-        ##Positive is up lag = 65 for 150 rps
-        perpendicular_lag = int(np.ceil((10404.0/rotations_per_second) - 5.30))
-        for i in range(rotations_per_write):
-            for n in range(10):
-                start = (i * points_per_trigger * triggers_per_rotation +
-                         n * points_per_facet + 
-                         perpendicular_lag)
-                self.daq.perpendicular_facet_times.append(start)
+        for facet in range(facets_per_rotation):
+            self.daq.perpendicular_facet_times.append(
+                facet * points_per_facet + perpendicular_lag)
 
-        laser_signal = np.zeros((points_per_write), dtype=np.float64)
+        ##FIXME: Put this shit into an "alignment" panel
+        """
+        want continuous laser firing? try these lines.
+
+        laser_signal = np.zeros((points_per_rotation), dtype=np.float64)
         laser_duration = 1
         for i in range(len(self.daq.perpendicular_facet_times)):
             place = self.daq.perpendicular_facet_times[i]
             laser_signal[place:place+laser_duration] = 10
-
-        ##want continuous laser firing? try these lines.
-        ##self.daq.set_default_voltage(laser_signal, 0)
-        ##self.daq.set_default_voltage(laser_signal, 1)
+        self.daq.set_default_voltage(laser_signal, 0)
+        self.daq.set_default_voltage(laser_signal, 1)
+        """
         
         self.seconds_per_write = self.daq.write_length * 1.0 / self.daq.rate
         print "Seconds per write:", self.seconds_per_write
-
-        TIMER_ID = 100
-        self.daq_timer = wx.Timer(self.panel, TIMER_ID)
-        self.daq_timer.Start(round(self.seconds_per_write * 1000 * 0.95))
-        wx.EVT_TIMER(self.panel, TIMER_ID, self.on_daq_timer)
-        self.last_daq_time = 0
 
 class IntensityScaleFrame(wx.Frame):
     def __init__(self, parent):
@@ -476,12 +522,26 @@ class IntensityScaleFrame(wx.Frame):
     
     def onClose(self, evt):
         self.Destroy()
-        self.parent.scale_frame_open = False
+        del self.parent.scale_frame
+"""
+Convert names to numerical channels for the DAQ with this dict:
+"""
+n2c = {
+    '488': 0,
+    '561': 1,
+    'blanking': 2,
+    'objective': 3,
+    'excitation_scan': 4,
+    'emission_scan': 5,
+    'camera': 6,
+    'wheel': 7}
 
 if __name__ == '__main__':
     app = wx.App(0)
     frame = ParentFrame(None, -1, 'Microscope Control')
     frame.Show(True)
     frame.Centre()
+    x, y = frame.GetPosition()
+    frame.Move((x//2, y))
     app.MainLoop()
     print "Done"

@@ -575,6 +575,8 @@ class Display:
             min(screen_width//2, screen_height),
             min(screen_width//2, screen_height),
             caption='Display', resizable=True)
+        self.window.set_location(int((screen_width * 0.95) // 2),
+                                 screen_height//20)
         self.default_image_scale = min(
             (screen_width//2) * 1.0 / self.image.width,
             screen_height * 1.0 / self.image.height)

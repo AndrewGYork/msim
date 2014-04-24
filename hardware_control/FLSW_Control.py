@@ -7,6 +7,7 @@ from daq import DAQ_with_queue
 from image_data_pipeline import Image_Data_Pipeline
 import multiprocessing as mp
 import logging
+from simple_tif import tif_to_array
 
 class ParentFrame(wx.Frame):
     def __init__(self, parent, id, title):
@@ -97,14 +98,15 @@ class ParentFrame(wx.Frame):
         change_voltage_value = self.floatspin.GetValue()
         change_voltage = np.zeros((self.daq.write_length), dtype=np.float64)
         change_voltage[:] = change_voltage_value
-        self.daq.set_default_voltage(change_voltage, 3)
+        if change_voltage[0] > 0 and change_voltage[0] <10:
+            self.daq.set_default_voltage(change_voltage, 3)
 
     def on_snap(self, event):
         print self.idp.check_children() #Eventually add this to a timer
         self.idp.collect_data_buffers()
         if len(self.idp.idle_data_buffers) > 0:
             self.idp.load_data_buffers(
-                1, [{'outfile':'image_%06i.tif'%self.saved_files}])
+                1, )#[{'outfile':'image_%06i.tif'%self.saved_files}])
             self.daq.play_voltage('snap')
             print "OH SNAP!"
             self.saved_files += 1
@@ -145,7 +147,7 @@ class ParentFrame(wx.Frame):
             saved_files += 1
             self.daq.roll_voltage(voltage_name='characterize',
                                   channel=n2c['emission_scan'],
-                                  roll_pixels=-1)
+                                  roll_pixels=-2)
         return None
    
     def OnClose(self, event):
@@ -159,29 +161,48 @@ class ParentFrame(wx.Frame):
         Create the murrrcle signal up here. All we care about is how
         many DAQ points long it is.
         """
-        num_periods = 2
-        daq_timepoints_per_period = 500
-        amplitude_volts = 0.1
-        murrcle_signal = np.sin(np.linspace(
-            0, 2*np.pi*num_periods, num_periods * daq_timepoints_per_period))
+##        num_periods = 4
+##        daq_timepoints_per_period = 1500
+##        amplitude_volts = 0.1
+##        murrcle_signal = np.sin(np.linspace(
+##            0, 2*np.pi*num_periods, num_periods * daq_timepoints_per_period))
+##        murrcle_signal[:daq_timepoints_per_period] = 0
+##        murrcle_signal[-daq_timepoints_per_period:] = 0
+        murrcle_signal = np.zeros(20000, dtype=np.float64)
+##        murrcle_signal[1000:1152] = 0.05
+##        murrcle_signal[1152:-1000] = 0.1
+##        murrcle_signal[1000:1005] = 0.3
+        signal = 0.16 * tif_to_array(filename='test.tif').astype(np.float64)
+        print "Signal min, signal max:", signal.min(), signal.max()
+        print
+        """
+        Put this optimzed waveform into the larger array
+        """
+        murrcle_signal[:signal.size] = signal[:, 0, 0]
+        print "signal size", signal.size
+        """
+        Smoothly drop the voltage to zero; hopefully this reduces ringing.
+        """
+        murrcle_signal[signal.size:2*(signal.size)
+                       ] = np.linspace(signal[-1, 0, 0], 0, signal.size)
+        print "last value for signal" , signal[-1, 0 , 0]
+        print murrcle_signal[signal.size * 1.5]
         self.characterization_points = murrcle_signal.size
-        if murrcle_signal.size < self.daq.write_length:
-            temp_signal = np.zeros(self.daq.write_length, dtype=np.float64)
-            temp_signal[:murrcle_signal.size] = murrcle_signal
-            murrcle_signal = temp_signal
-            del temp_signal
 
-        assert (self.exposure_time_microseconds >=
-                self.get_camera_rolling_time_microseconds())
-        delay_points = max(
-            murrcle_signal.shape[0], #Figure out the limiting factor
-            (1e-6 * self.get_camera_rolling_time_microseconds() *
-             self.daq.rate))
-        voltage = np.zeros(((delay_points +
-                             murrcle_signal.shape[0] +
-                             self.daq.perpendicular_facet_times[0]),
+        delay_points = max( #Figure out the limiting factor
+            murrcle_signal.size,
+            1e-6 * self.get_camera_rolling_time_microseconds() * self.daq.rate)
+        start_point_laser = (#Integer num of writes plus a perp facet time
+            self.daq.perpendicular_facet_times[0] +
+            self.daq.write_length * int(np.ceil(delay_points * 1.0 /
+                                                self.daq.write_length)))
+        assert (self.exposure_time_microseconds * 1e6 >=
+                start_point_laser * 1.0 / self.daq.rate)
+        voltage = np.zeros(((start_point_laser +  murrcle_signal.shape[0]),
                             self.daq.num_mutable_channels),
                            dtype=np.float64)
+        ##objective voltage voltage
+        
         """
         Trigger the camera
         """
@@ -189,26 +210,12 @@ class ParentFrame(wx.Frame):
         """
         Trigger the laser
         """
-        print "daq write length", self.daq.write_length
-        print
-        print "delay points", delay_points
-        print
-        print 'perp time', self.daq.perpendicular_facet_times[0]
-        print
-        start_point_laser = (#Integer num of writes plus a perp facet time
-            self.daq.perpendicular_facet_times[0] +
-            self.daq.write_length * int(np.ceil(delay_points * 1.0 /
-                                                self.daq.write_length)))
-        print "start point laser", start_point_laser
-        print
         voltage[start_point_laser, n2c['488']] = 10
         voltage[start_point_laser, n2c['blanking']] = 10
         """
         Wiggle the murrrrcle
         """ 
         voltage[-murrcle_signal.size:, n2c['emission_scan']] = murrcle_signal
-        time.sleep(1)
-        print voltage.shape, voltage.dtype, voltage.min(), voltage.max()
         self.daq.send_voltage(voltage, 'characterize')
         return None
     
@@ -218,11 +225,17 @@ class ParentFrame(wx.Frame):
         oh_snap_voltages = np.zeros(
             (self.daq.write_length  + roll_time, self.daq.num_mutable_channels),
             dtype=np.float64)
+
+        ##objective stays at what it was
+        objective_voltage = self.daq.default_voltages[0, n2c['objective']]
+        oh_snap_voltages[:, n2c['objective']] = objective_voltage
+        
         #Camera triggers at the start of a write
         oh_snap_voltages[:self.daq.write_length//4, n2c['camera']] = 3
+        
         #AOTF fires on one perpendicular facet
         start_point_laser = (#Integer num of writes plus a perp facet time
-            self.daq.perpendicular_facet_times[0] +
+            self.daq.perpendicular_facet_times[6] +
             self.daq.write_length * int(roll_time * 1.0 /
                                         self.daq.write_length))
         oh_snap_voltages[start_point_laser, n2c['488']] = 10
@@ -235,8 +248,9 @@ class ParentFrame(wx.Frame):
     def initialize_image_data_pipeline(self):
         self.idp = Image_Data_Pipeline(
             num_buffers=15,
-            buffer_shape=(1, 2048, 2060)) ##256 or 2048, 2060
-        desired_exposure_time_microseconds = 20000
+            buffer_shape=(1, 256, 2060), ##256 or 2048, 2060
+            camera_high_priority=True)
+        desired_exposure_time_microseconds = 60000
         """
         Rep rate of camera is dictated by rep rate of the wheel. Exposure
         time of the camera has to be 20 microseconds shorter than the
@@ -245,7 +259,7 @@ class ParentFrame(wx.Frame):
         self.idp.camera.commands.send(
             ('apply_settings',
              {'trigger': 'external trigger/software exposure control',
-              'region_of_interest': (-1, -1, 10000, 10000),##897, 1152
+              'region_of_interest': (-1, 897, 10000, 1152),##897, 1152
               'exposure_time_microseconds': desired_exposure_time_microseconds}
              ))
         camera_response = self.idp.camera.commands.recv()
@@ -327,7 +341,8 @@ class ParentFrame(wx.Frame):
         self.daq = DAQ_with_queue(num_immutable_channels=1,
                                   default_voltage=default_voltage,
                                   rate=points_per_second,
-                                  write_length=points_per_rotation)
+                                  write_length=points_per_rotation,
+                                  high_priority=True)
         """
         Positive lag raises first wheel reflection, lag=65 for 150 rps
         Empirically determined!

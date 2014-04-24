@@ -1,5 +1,6 @@
 import time
 import sys
+import os
 import ctypes
 import warnings
 import Queue
@@ -18,8 +19,10 @@ log = mp.get_logger()
 info = log.info
 debug = log.debug
 if sys.platform == 'win32':
+    is_windows = True
     clock = time.clock
 else:
+    is_windows = False
     clock = time.time
 
 class DAQ_with_queue:
@@ -30,7 +33,8 @@ class DAQ_with_queue:
         default_voltage=None,
         rate=1e5,
         regenerate=False,
-        write_length=10000):
+        write_length=10000,
+        high_priority=False):
         """
         Expected use pattern:
          *Initialize
@@ -40,6 +44,7 @@ class DAQ_with_queue:
          desired
          *Close
         """
+        self.default_voltages = default_voltage
         self.rate = rate
         self.write_length = write_length
         self.num_channels = num_channels
@@ -60,7 +65,8 @@ class DAQ_with_queue:
                   num_immutable_channels,
                   default_voltage,
                   rate,
-                  write_length),
+                  write_length,
+                  high_priority),
             name='DAQ')
         self.child.start()
         self.sent_voltages = {}
@@ -72,6 +78,7 @@ class DAQ_with_queue:
         into write_length pieces, and spits it to the child, padded as
         neccesary.
         """
+        
         if voltage.shape[1] != self.num_mutable_channels:
             raise UserWarning(
                 "%i Mutable channels selected," +
@@ -85,9 +92,17 @@ class DAQ_with_queue:
             np.ceil(timepoints * 1.0 /
                     self.write_length))
         if closest_available_timepoints > timepoints:
+            ##Make it pad with the defualt voltages???
+            
             temp_voltage = np.zeros(
                 (closest_available_timepoints, self.num_mutable_channels),
                 dtype=np.float64)
+            for i in range(int(np.ceil(timepoints * 1.0 / self.write_length))):
+                temp_voltage[(self.write_length * i):(
+                    self.write_length * (i+1)), :] = (self.default_voltages[:,:(
+                        self.num_mutable_channels)])
+                ##fill with defaults
+            
             temp_voltage[:timepoints, :self.num_mutable_channels] = voltage
             voltage = temp_voltage
         voltage = voltage.reshape(
@@ -107,6 +122,7 @@ class DAQ_with_queue:
 
     def set_default_voltage(
         self, voltage, channel, voltage_name='default'):
+        self.default_voltages[:, channel] = voltage
         self.commands.send(('set_default_voltage', {'name': voltage_name,
                                                     'channel': channel}))
         self.input_queue.put((voltage_name, voltage))
@@ -141,7 +157,10 @@ def DAQ_child_process(
     num_immutable_channels,
     default_voltage,
     rate,
-    write_length):
+    write_length,
+    high_priority):
+    if high_priority:
+        set_priority_high()
     loaded_signals = {}
     daq = DAQ(num_channels=num_channels,
               default_voltage=default_voltage,
@@ -397,6 +416,30 @@ def DAQmxErrChk(err_code):
             print np.ctypeslib.as_array(errBuff).tostring()
         raise UserWarning("NI DAQ error code: %i"%(err_code))
 
+def set_priority_high():
+    """ Set the priority of the process to high.
+    http://stackoverflow.com/a/1023269
+    """
+    if sys.platform == 'win32':
+        """
+        Based on:
+           "Recipe 496767: Set Process Priority In Windows" on ActiveState
+           http://code.activestate.com/recipes/496767/
+        """
+        import win32api, win32process, win32con
+        pid = win32api.GetCurrentProcessId()
+        handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, True, pid)
+        win32process.SetPriorityClass(
+            handle, win32process.HIGH_PRIORITY_CLASS)
+    else:
+        import os
+        try:
+            os.nice(-10)
+        except:
+            raise UserWarning(
+                "Nice fail" +
+                "; you might need to be root to encourage bad behavior ;)")
+
 if __name__ == '__main__':
     import logging
     logger = mp.log_to_stderr()
@@ -423,31 +466,6 @@ if __name__ == '__main__':
 ##    raw_input("Hit Enter to test the DAQ_with_queue object...")
 
 
-    daq = DAQ_with_queue(
-        num_channels=8,
-        num_immutable_channels=1,)
-    print "Waiting a bit..."
-    time.sleep(1)
-    print "Sending signal..."
-    sig = np.zeros((10000, 7), dtype=np.float64)
-    sig[4500:5500, 0] = 1
-    sig[4500:5500, 1] = 1
-    daq.send_voltage(sig, 'sig0')
-    daq.play_voltage('sig0')
-    time.sleep(0.5)
-    daq.roll_voltage(voltage_name='sig0', channel=0, roll_pixels=0)
-    daq.play_voltage('sig0')
-    print "Done sending."
-    time.sleep(1)
-    daq.set_default_voltage(voltage=np.ones((1, daq.write_length)),
-                            channel=1)
-    time.sleep(3)
-    daq.close()
-    raw_input()
-
-##    """
-##    Test basic functionality of the 'DAQ_with_queue' object
-##    """
 ##    daq = DAQ_with_queue(
 ##        num_channels=8,
 ##        num_immutable_channels=1,)
@@ -455,25 +473,50 @@ if __name__ == '__main__':
 ##    time.sleep(1)
 ##    print "Sending signal..."
 ##    sig = np.zeros((10000, 7), dtype=np.float64)
+##    sig[4500:5500, 0] = 1
+##    sig[4500:5500, 1] = 1
 ##    daq.send_voltage(sig, 'sig0')
 ##    daq.play_voltage('sig0')
-##    print "Done sending."
-##    print "Waiting a bit..."
-##    time.sleep(1)
-##    print "Sending several small signals..."
-##    sig1 = 0.1 * np.ones((9000, 7), dtype=np.float64)
-##    sig2 = 0.2 * np.ones((10000, 7), dtype=np.float64)
-##    sig3 = 0.3 * np.ones((11000, 7), dtype=np.float64)
-##    sig4 = 0.4 * np.ones((12000, 7), dtype=np.float64)
-##    daq.send_voltage(sig1, 'sig1')
-##    daq.send_voltage(sig2, 'sig2')
-##    daq.send_voltage(sig3, 'sig3')
-##    daq.send_voltage(sig4, 'sig4')
-##    daq.play_voltage('sig1')
-##    daq.play_voltage('sig2')
-##    daq.play_voltage('sig3')
-##    daq.play_voltage('sig4')
+##    time.sleep(0.5)
+##    daq.roll_voltage(voltage_name='sig0', channel=0, roll_pixels=0)
 ##    daq.play_voltage('sig0')
 ##    print "Done sending."
+##    time.sleep(1)
+##    daq.set_default_voltage(voltage=np.ones((1, daq.write_length)),
+##                            channel=1)
+##    time.sleep(3)
 ##    daq.close()
 ##    raw_input()
+
+    """
+    Test basic functionality of the 'DAQ_with_queue' object
+    """
+    daq = DAQ_with_queue(
+        num_channels=8,
+        num_immutable_channels=1,)
+    print "Waiting a bit..."
+    time.sleep(1)
+    print "Sending signal..."
+    sig = np.zeros((10000, 7), dtype=np.float64)
+    daq.send_voltage(sig, 'sig0')
+    daq.play_voltage('sig0')
+    print "Done sending."
+    print "Waiting a bit..."
+    time.sleep(1)
+    print "Sending several small signals..."
+    sig1 = 0.1 * np.ones((9000, 7), dtype=np.float64)
+    sig2 = 0.2 * np.ones((10000, 7), dtype=np.float64)
+    sig3 = 0.3 * np.ones((11000, 7), dtype=np.float64)
+    sig4 = 0.4 * np.ones((12000, 7), dtype=np.float64)
+    daq.send_voltage(sig1, 'sig1')
+    daq.send_voltage(sig2, 'sig2')
+    daq.send_voltage(sig3, 'sig3')
+    daq.send_voltage(sig4, 'sig4')
+    daq.play_voltage('sig1')
+    daq.play_voltage('sig2')
+    daq.play_voltage('sig3')
+    daq.play_voltage('sig4')
+    daq.play_voltage('sig0')
+    print "Done sending."
+    raw_input()
+    daq.close()

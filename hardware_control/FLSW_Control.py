@@ -12,47 +12,99 @@ from simple_tif import tif_to_array
 class ParentFrame(wx.Frame):
     def __init__(self, parent, id, title):
         wx.Frame.__init__(
-            self, parent, id, title, wx.DefaultPosition, (450, 200))
+            self, parent, id, title, wx.DefaultPosition, (500, 300))
         self.panel = wx.Panel(self, -1)
 
         vbox = wx.BoxSizer(wx.VERTICAL)
         hbox = wx.BoxSizer(wx.HORIZONTAL)
+        hbox_adjust_objective = wx.BoxSizer(wx.HORIZONTAL)
+        hbox_adjust_excitation_galvo = wx.BoxSizer(wx.HORIZONTAL)
+        hbox_adjust_illumination = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.floatspin = FS.FloatSpin(
-            self.panel, -1, pos=(50, 50), min_val=0, max_val=10,
+        self.floatspin_objective = FS.FloatSpin(
+            self.panel, -1, pos=(0, 0), min_val=0, max_val=10,
             increment=0.1, value=5, agwStyle=FS.FS_CENTRE)
-        self.floatspin.SetFormat("%f")
-        self.floatspin.SetDigits(2)
+        self.floatspin_objective.SetFormat("%f")
+        self.floatspin_objective.SetDigits(2)
 
-        btnAdjust = wx.Button(self.panel, 7, 'Adjust')
+        self.floatspin_excitation_galvo = FS.FloatSpin(
+            self.panel, -1, pos=(0, 0), min_val=-9.99, max_val=9.99,
+            increment=0.1, value=0, agwStyle=FS.FS_CENTRE)
+        self.floatspin_excitation_galvo.SetFormat("%f")
+        self.floatspin_excitation_galvo.SetDigits(2)
+
+        self.floatspin_length = FS.FloatSpin(
+            self.panel, -1, pos=(0, 0), min_val=0, max_val=250,
+            increment=1, value=1, agwStyle=FS.FS_CENTRE)
+        self.floatspin_length.SetFormat("%f")
+        self.floatspin_length.SetDigits(1)
+
+        self.floatspin_offset = FS.FloatSpin(
+            self.panel, -1, pos=(0, 0), min_val=-250, max_val=250,
+            increment=1, value=0, agwStyle=FS.FS_CENTRE)
+        self.floatspin_offset.SetFormat("%f")
+        self.floatspin_offset.SetDigits(1)
+
+        btnAdjust_Objective = wx.Button(self.panel, 7, 'Adjust Objective')
+        btnAdjust_Excitation_Galvo = wx.Button(
+            self.panel, 6, 'Adjust Excitation Galvo')
+        st1 = wx.StaticText(self.panel, label="Length:")
+        st2 = wx.StaticText(self.panel, label="Offset:")
+        btnAdjust_Illumination = wx.Button(
+            self.panel, 5, 'Adjust Illumination')
+        self.illumination_length = 1
+        self.illumination_offset = 0
         btnSnap = wx.Button(self.panel, 8, 'Snap')
         btnClose = wx.Button(self.panel, 9, 'Close')
         btnCharacterize = wx.Button(self.panel, 10, 'Characterize')
+        btnVolume = wx.Button(self.panel, 11, 'Volume')
 
         self.Bind(wx.EVT_CLOSE, self.OnClose)
-        btnAdjust.Bind(wx.EVT_BUTTON, self.on_adjust)
+        btnAdjust_Objective.Bind(wx.EVT_BUTTON, self.on_adjust_objective)
+        btnAdjust_Illumination.Bind(wx.EVT_BUTTON, self.on_adjust_illumination)
+        btnAdjust_Excitation_Galvo.Bind(wx.EVT_BUTTON, self.on_adjust_excitation_galvo)
         btnSnap.Bind(wx.EVT_BUTTON, self.on_snap)
         btnCharacterize.Bind(wx.EVT_BUTTON, self.on_characterize)
         btnClose.Bind(wx.EVT_BUTTON, self.OnClose)
-        
-        vbox.Add(self.floatspin, 1, wx.ALIGN_CENTRE | wx.ALL, 25)
-        hbox.Add(btnAdjust, 1, 10)
+
+
+        vbox.AddSpacer(25)
+        hbox_adjust_illumination.Add(st1, 1, 25)
+        hbox_adjust_illumination.Add(self.floatspin_length, 1, 25)
+        hbox_adjust_illumination.Add(st2, 1, 25)
+        hbox_adjust_illumination.Add(self.floatspin_offset, 1, 25)
+        hbox_adjust_illumination.AddSpacer(15)
+        hbox_adjust_illumination.Add(btnAdjust_Illumination, 1, 25)
+        vbox.Add(hbox_adjust_illumination, 0, wx.ALIGN_CENTRE, 10)
+
+        vbox.AddSpacer(15)
+        hbox_adjust_objective.Add(self.floatspin_objective, 1, 25)
+        hbox_adjust_objective.AddSpacer(15)
+        hbox_adjust_objective.Add(btnAdjust_Objective, 1, 25)
+        vbox.Add(hbox_adjust_objective, 0, wx.ALIGN_CENTRE, 10)
+        vbox.AddSpacer(15)
+        hbox_adjust_excitation_galvo.Add(self.floatspin_excitation_galvo, 1, 25)
+        hbox_adjust_excitation_galvo.AddSpacer(15)
+        hbox_adjust_excitation_galvo.Add(btnAdjust_Excitation_Galvo, 1, 25)
+        vbox.Add(hbox_adjust_excitation_galvo, 0, wx.ALIGN_CENTRE, 10)
+        vbox.AddSpacer(15)
+        hbox.Add(btnVolume, 1, 10)
+        hbox.AddSpacer(10)
         hbox.Add(btnSnap, 1, 10)
-        hbox.Add(btnClose, 1, 10)
+        hbox.AddSpacer(10)
         hbox.Add(btnCharacterize, 1, 10)
+        hbox.AddSpacer(10)
+        hbox.Add(btnClose, 1, 10)
         vbox.Add(hbox, 0, wx.ALIGN_CENTRE | wx.ALL, 10)
         self.panel.SetSizer(vbox)
 
         self.CreateStatusBar() 
 
         filemenu= wx.Menu()
-
         menuAbout = filemenu.Append(wx.ID_ABOUT, "&About",
                                     " Information about this program")
         menuExit = filemenu.Append(wx.ID_EXIT,"E&xit"," Terminate the program")
-
         imagemenu= wx.Menu()
-
         menuScale = imagemenu.Append(
             wx.ID_ANY, "&Scale", " Adjust the scaling of the image")
 
@@ -94,19 +146,39 @@ class ParentFrame(wx.Frame):
         self.scale_frame.Iconize(False)
         self.scale_frame.Raise()
 
-    def on_adjust(self, event):
-        change_voltage_value = self.floatspin.GetValue()
+    def on_adjust_illumination(self, event):
+        change_length_value = self.floatspin_length.GetValue()
+        change_offset_value = self.floatspin_offset.GetValue()
+        if change_length_value >= 0 and change_length_value <250:
+            self.illumination_length = change_length_value
+            self.illumination_offset = change_offset_value
+            print "offset", change_offset_value
+            self.initialize_snap()
+
+    def on_adjust_objective(self, event):
+        change_voltage_value = self.floatspin_objective.GetValue()
         change_voltage = np.zeros((self.daq.write_length), dtype=np.float64)
         change_voltage[:] = change_voltage_value
         if change_voltage[0] > 0 and change_voltage[0] <10:
             self.daq.set_default_voltage(change_voltage, 3)
+            self.initialize_snap()
+            self.initialize_characterize()
+
+    def on_adjust_excitation_galvo(self, event):
+        change_voltage_value = self.floatspin_excitation_galvo.GetValue()
+        change_voltage = np.zeros((self.daq.write_length), dtype=np.float64)
+        change_voltage[:] = change_voltage_value
+        if change_voltage[0] > -10 and change_voltage[0] <10:
+            self.daq.set_default_voltage(change_voltage, 4)
+            self.initialize_snap()
+            self.initialize_characterize()
 
     def on_snap(self, event):
         print self.idp.check_children() #Eventually add this to a timer
         self.idp.collect_data_buffers()
         if len(self.idp.idle_data_buffers) > 0:
             self.idp.load_data_buffers(
-                1, )#[{'outfile':'image_%06i.tif'%self.saved_files}])
+                1, ) ##[{'outfile':'image_%06i.tif'%self.saved_files}])
             self.daq.play_voltage('snap')
             print "OH SNAP!"
             self.saved_files += 1
@@ -130,24 +202,35 @@ class ParentFrame(wx.Frame):
         if not os.path.exists(data_dir):
             os.mkdir(data_dir)
         saved_files = 0
-        for i in range(self.characterization_points):
-            status = self.idp.check_children()
-            for k in sorted(status.keys()):
-                if not status[k]:
-                    print '*\n'*20
-                    print k, status[k]
-                    print '*\n'*20
-            while len(self.idp.idle_data_buffers) < 1:
-                self.idp.collect_data_buffers()
-            self.idp.load_data_buffers(
-                1, [{'outfile': os.path.join(
-                    data_dir, 'image_%06i.tif'%saved_files)}])
-            self.daq.play_voltage('characterize')
-            print "OH CHARACTERIZE!"
-            saved_files += 1
+        roll_pixels = 2
+        characterize_pixels = 6000
+        steps_per_rep = characterize_pixels // roll_pixels
+        num_reps = 1
+        for r in range(num_reps):
+            for step in range(steps_per_rep):
+                status = self.idp.check_children()
+                for k in sorted(status.keys()):
+                    if not status[k]:
+                        print '*\n'*20
+                        print k, status[k]
+                        print '*\n'*20
+                while len(self.idp.idle_data_buffers) < 1:
+                    self.idp.collect_data_buffers()
+                self.idp.load_data_buffers(
+                    1, [{'outfile': os.path.join(
+                        data_dir, 'image_%06i.tif'%saved_files)}])
+                self.daq.play_voltage('characterize')
+                print "OH CHARACTERIZE!"
+                saved_files += 1
+                self.daq.roll_voltage(voltage_name='characterize',
+                                      channel=n2c['emission_scan'],
+                                      roll_pixels=-roll_pixels)
+            """
+            Clean up after ourselves
+            """
             self.daq.roll_voltage(voltage_name='characterize',
-                                  channel=n2c['emission_scan'],
-                                  roll_pixels=-2)
+                              channel=n2c['emission_scan'],
+                              roll_pixels=steps_per_rep * roll_pixels)
         return None
    
     def OnClose(self, event):
@@ -161,6 +244,7 @@ class ParentFrame(wx.Frame):
         Create the murrrcle signal up here. All we care about is how
         many DAQ points long it is.
         """
+##        impulse_strength = 1
 ##        num_periods = 4
 ##        daq_timepoints_per_period = 1500
 ##        amplitude_volts = 0.1
@@ -169,27 +253,49 @@ class ParentFrame(wx.Frame):
 ##        murrcle_signal[:daq_timepoints_per_period] = 0
 ##        murrcle_signal[-daq_timepoints_per_period:] = 0
         murrcle_signal = np.zeros(20000, dtype=np.float64)
+        default_murrcle = self.daq.default_voltages[-1, n2c['emission_scan']]
+        murrcle_signal[:] = default_murrcle
 ##        murrcle_signal[1000:1152] = 0.05
 ##        murrcle_signal[1152:-1000] = 0.1
-##        murrcle_signal[1000:1005] = 0.3
-        signal = 0.16 * tif_to_array(filename='test.tif').astype(np.float64)
-        print "Signal min, signal max:", signal.min(), signal.max()
+##        murrcle_signal[200:204] = default_murrcle + impulse_strength
+
+
+        """
+        Read in an arbitrary signal from a tif file
+        """
+        loaded_signal = tif_to_array(
+            filename='input_voltage_to_mirror_05.tif').astype(np.float64)
+##        loaded_signal += default_murrcle
+##        loaded_signal *= 1.75
+
+##
+##        loaded_signal[loaded_signal < 0] *= 0.45
+##
+##        print "Pre Loaded signal min, max:",
+##        print loaded_signal.min(), loaded_signal.max()    
+##     
+        print "Loaded signal min, max:",
+        print loaded_signal.min(), loaded_signal.max()
         print
         """
         Put this optimzed waveform into the larger array
         """
-        murrcle_signal[:signal.size] = signal[:, 0, 0]
-        print "signal size", signal.size
-        """
-        Smoothly drop the voltage to zero; hopefully this reduces ringing.
-        """
-        murrcle_signal[signal.size:2*(signal.size)
-                       ] = np.linspace(signal[-1, 0, 0], 0, signal.size)
-        print "last value for signal" , signal[-1, 0 , 0]
-        print murrcle_signal[signal.size * 1.5]
+        murrcle_signal[:loaded_signal.size] = loaded_signal[:, 0, 0]
+        print "Loaded signal size", loaded_signal.size
+##        """
+##        Smoothly drop the voltage to default; hopefully this reduces ringing.
+##        """
+##        murrcle_signal[loaded_signal.size:2*(loaded_signal.size)
+##                       ] = np.linspace(
+##                           loaded_signal[-1, 0, 0],
+##                           default_murrcle,
+##                           loaded_signal.size)
+##        print "last value for signal" , loaded_signal[-1, 0 , 0]
+##        print murrcle_signal[loaded_signal.size * 1.5] #Remove this soon
+##        
         self.characterization_points = murrcle_signal.size
 
-        delay_points = max( #Figure out the limiting factor
+        delay_points = max(#Figure out the limiting factor
             murrcle_signal.size,
             1e-6 * self.get_camera_rolling_time_microseconds() * self.daq.rate)
         start_point_laser = (#Integer num of writes plus a perp facet time
@@ -201,7 +307,6 @@ class ParentFrame(wx.Frame):
         voltage = np.zeros(((start_point_laser +  murrcle_signal.shape[0]),
                             self.daq.num_mutable_channels),
                            dtype=np.float64)
-        ##objective voltage voltage
         
         """
         Trigger the camera
@@ -214,33 +319,183 @@ class ParentFrame(wx.Frame):
         voltage[start_point_laser, n2c['blanking']] = 10
         """
         Wiggle the murrrrcle
-        """ 
+        """
+        print "murrcle_Signal[0]", murrcle_signal[0]
+        print "murrcle_Signal[-1]", murrcle_signal[-1]
+        print "default murrcle", default_murrcle
+##        assert murrcle_signal[0] == default_murrcle
+        assert murrcle_signal[-1] == default_murrcle
+        voltage[:, n2c['emission_scan']] = default_murrcle
         voltage[-murrcle_signal.size:, n2c['emission_scan']] = murrcle_signal
+        print "Impulse starts at DAQ pixel:",
+        print voltage.size - murrcle_signal.size + 250
+        
+        """
+        Objective stays at what it was
+        """
+        objective_voltage = self.daq.default_voltages[-1, n2c['objective']]
+        voltage[:, n2c['objective']] = objective_voltage
+        """
+        Excitation Galvo stays at what it was
+        """
+        galvo_voltage = self.daq.default_voltages[-1, n2c['excitation_scan']]
+        voltage[:, n2c['excitation_scan']] = galvo_voltage
+
         self.daq.send_voltage(voltage, 'characterize')
+        
         return None
     
     def initialize_snap(self):
+        
         ##Assume full-frame camera operation, 10 ms roll time
         roll_time = int(np.ceil(self.daq.rate * 0.01))
+####        oh_snap_voltages = np.zeros(
+####            (self.daq.write_length  + roll_time, self.daq.num_mutable_channels),
+####            dtype=np.float64)
+
         oh_snap_voltages = np.zeros(
-            (self.daq.write_length  + roll_time, self.daq.num_mutable_channels),
+            (30000, self.daq.num_mutable_channels),
             dtype=np.float64)
 
         ##objective stays at what it was
-        objective_voltage = self.daq.default_voltages[0, n2c['objective']]
+        objective_voltage = self.daq.default_voltages[-1, n2c['objective']]
         oh_snap_voltages[:, n2c['objective']] = objective_voltage
+
+        ##excitation galvo stays at what it was
+        galvo_voltage = self.daq.default_voltages[-1, n2c['excitation_scan']]
+        oh_snap_voltages[:, n2c['excitation_scan']] = galvo_voltage
+
+        ##murrcle stays at what it was
+        murrcle_voltage = self.daq.default_voltages[-1, n2c['emission_scan']]
+        oh_snap_voltages[:, n2c['emission_scan']] = murrcle_voltage
         
         #Camera triggers at the start of a write
         oh_snap_voltages[:self.daq.write_length//4, n2c['camera']] = 3
         
         #AOTF fires on one perpendicular facet
+        
         start_point_laser = (#Integer num of writes plus a perp facet time
-            self.daq.perpendicular_facet_times[6] +
+            self.daq.perpendicular_facet_times[6] + self.illumination_offset+
             self.daq.write_length * int(roll_time * 1.0 /
                                         self.daq.write_length))
-        oh_snap_voltages[start_point_laser, n2c['488']] = 10
-        oh_snap_voltages[start_point_laser, n2c['blanking']] = 10
+        oh_snap_voltages[start_point_laser:start_point_laser+self.illumination_length, n2c['488']] = 10
+        oh_snap_voltages[start_point_laser:start_point_laser+self.illumination_length, n2c['blanking']] = 10
+
+##        oh_snap_voltages[start_point_laser, n2c['blanking']] = 10
         time.sleep(1)
+
+        """
+        let's test the objective impulse response
+        """
+##        marker = start_point_laser
+##        scan = np.linspace(5, 6, 5000)        
+##        oh_snap_voltages[marker:(marker+5000), n2c['objective']] = scan
+##        marker += 5000
+##        oh_snap_voltages[marker:(
+##            marker+2500), n2c['objective']] = 6
+##        marker += 2500
+##        oh_snap_voltages[marker:(
+##            marker+5000), n2c['objective']] = np.linspace(6,5,5000)
+##        marker += 5000        
+        
+##        loaded_signal = tif_to_array(
+##            filename='input_voltage_objective_00.tif').astype(
+##                np.float64).ravel()
+##        loaded_signal += objective_voltage
+##        oh_snap_voltages[:22500, n2c['objective']] = loaded_signal[:]
+##        print "min", oh_snap_voltages[:, n2c['objective']].min()
+##        print "max", oh_snap_voltages[:, n2c['objective']].max()
+##
+##        loaded_desired_signal = tif_to_array(
+##            filename='desired_result_objective.tif').astype(
+##                np.float64).ravel()
+##        loaded_desired_signal += objective_voltage
+##        loaded_desired_signal[0] += 1
+##        oh_snap_voltages[:, n2c['561']] = objective_voltage
+##        oh_snap_voltages[:22500, n2c['561']] = loaded_desired_signal[:]
+        
+        print oh_snap_voltages.shape
+        self.daq.send_voltage(oh_snap_voltages, 'snap')
+        return None
+
+    def initialize_volume(self):
+        
+        volume_voltages = np.zeros((30000, self.daq.num_mutable_channels),
+            dtype=np.float64)
+
+        ##objective starts where it was
+        objective_voltage = self.daq.default_voltages[-1, n2c['objective']]
+        volume_voltages[:, n2c['objective']] = objective_voltage
+
+        ##objective does loaded scan
+        loaded_signal = tif_to_array(
+            filename='input_voltage_objective_01.tif').astype(
+                np.float64).ravel()
+        loaded_signal += objective_voltage
+        volume_voltages[:22500, n2c['objective']] = loaded_signal[:]
+        print "min", oh_snap_voltages[:, n2c['objective']].min()
+        print "max", oh_snap_voltages[:, n2c['objective']].max()
+
+        ##excitation galvo starts where it was
+        galvo_voltage = self.daq.default_voltages[-1, n2c['excitation_scan']]
+        volume_voltages[:, n2c['excitation_scan']] = galvo_voltage
+
+        ##excitation galvo scans illumination
+        galvo_voltage[5000:10000] = np.linspace(
+            galvo_voltage, galvo_voltage + 0.2, 5000)
+        galvo_voltage[10000:12500] = galvo_voltage + 0.2
+        galvo_voltage[12500:17500] = np.linspace(
+            galvo_voltage + 0.2, galvo_voltage, 5000)
+
+        ##murrcle stays at what it was
+        murrcle_voltage = self.daq.default_voltages[-1, n2c['emission_scan']]
+        oh_snap_voltages[:, n2c['emission_scan']] = murrcle_voltage
+        
+        #Camera triggers at the start of a write
+        oh_snap_voltages[:self.daq.write_length//4, n2c['camera']] = 3
+        
+        #AOTF fires on one perpendicular facet
+        
+        start_point_laser = (#Integer num of writes plus a perp facet time
+            self.daq.perpendicular_facet_times[6] + self.illumination_offset+
+            self.daq.write_length * int(roll_time * 1.0 /
+                                        self.daq.write_length))
+        oh_snap_voltages[start_point_laser:start_point_laser+self.illumination_length, n2c['488']] = 10
+        oh_snap_voltages[start_point_laser:start_point_laser+self.illumination_length, n2c['blanking']] = 10
+
+##        oh_snap_voltages[start_point_laser, n2c['blanking']] = 10
+        time.sleep(1)
+
+        """
+        let's test the objective impulse response
+        """
+##        marker = start_point_laser
+##        scan = np.linspace(5, 6, 5000)        
+##        oh_snap_voltages[marker:(marker+5000), n2c['objective']] = scan
+##        marker += 5000
+##        oh_snap_voltages[marker:(
+##            marker+2500), n2c['objective']] = 6
+##        marker += 2500
+##        oh_snap_voltages[marker:(
+##            marker+5000), n2c['objective']] = np.linspace(6,5,5000)
+##        marker += 5000        
+        
+##        loaded_signal = tif_to_array(
+##            filename='input_voltage_objective_00.tif').astype(
+##                np.float64).ravel()
+##        loaded_signal += objective_voltage
+##        oh_snap_voltages[:22500, n2c['objective']] = loaded_signal[:]
+##        print "min", oh_snap_voltages[:, n2c['objective']].min()
+##        print "max", oh_snap_voltages[:, n2c['objective']].max()
+##
+##        loaded_desired_signal = tif_to_array(
+##            filename='desired_result_objective.tif').astype(
+##                np.float64).ravel()
+##        loaded_desired_signal += objective_voltage
+##        loaded_desired_signal[0] += 1
+##        oh_snap_voltages[:, n2c['561']] = objective_voltage
+##        oh_snap_voltages[:22500, n2c['561']] = loaded_desired_signal[:]
+        
         print oh_snap_voltages.shape
         self.daq.send_voltage(oh_snap_voltages, 'snap')
         return None
@@ -248,7 +503,7 @@ class ParentFrame(wx.Frame):
     def initialize_image_data_pipeline(self):
         self.idp = Image_Data_Pipeline(
             num_buffers=15,
-            buffer_shape=(1, 256, 2060), ##256 or 2048, 2060
+            buffer_shape=(1, 2042, 2060), ##256 or 2048, 2060
             camera_high_priority=True)
         desired_exposure_time_microseconds = 60000
         """
@@ -259,7 +514,7 @@ class ParentFrame(wx.Frame):
         self.idp.camera.commands.send(
             ('apply_settings',
              {'trigger': 'external trigger/software exposure control',
-              'region_of_interest': (-1, 897, 10000, 1152),##897, 1152
+              'region_of_interest': (-1, 4, 10000, 2044),##897, 1152
               'exposure_time_microseconds': desired_exposure_time_microseconds}
              ))
         camera_response = self.idp.camera.commands.recv()
@@ -289,7 +544,7 @@ class ParentFrame(wx.Frame):
         return int(num_lines * seconds_per_line * 1e6)
 
     def initialize_daq(self):
-        rotations_per_second = 150
+        rotations_per_second = 200
         facets_per_rotation = 10
         points_per_second = 500000
         num_channels = 8
@@ -330,11 +585,11 @@ class ParentFrame(wx.Frame):
             (points_per_rotation, num_channels), dtype=np.float64)
 
         default_voltage[:, n2c['488']] = 0
-        default_voltage[:, n2c['561']] = 0
+        default_voltage[:, n2c['561']] = 0 ##5 ####CHANGE ME BACK
         default_voltage[:, n2c['blanking']] = 0
         default_voltage[:, n2c['objective']] = 5
         default_voltage[:, n2c['excitation_scan']] = 0
-        default_voltage[:, n2c['emission_scan']] = 0
+        default_voltage[:, n2c['emission_scan']] = 0 #-4.45
         default_voltage[:, n2c['camera']] = 0
         default_voltage[:, n2c['wheel']] = wheel_signal
 
@@ -347,7 +602,7 @@ class ParentFrame(wx.Frame):
         Positive lag raises first wheel reflection, lag=65 for 150 rps
         Empirically determined!
         """
-        perpendicular_lag = int(np.ceil((10404.0/rotations_per_second) - 5.0))
+        perpendicular_lag = int(np.ceil((10404.0/rotations_per_second) - 10.0))
         self.daq.perpendicular_facet_times = []
         for facet in range(facets_per_rotation):
             self.daq.perpendicular_facet_times.append(
@@ -355,17 +610,24 @@ class ParentFrame(wx.Frame):
 
         ##FIXME: Put this shit into an "alignment" panel
         """
-        want continuous laser firing? try these lines.
-
-        laser_signal = np.zeros((points_per_rotation), dtype=np.float64)
-        laser_duration = 1
-        for i in range(len(self.daq.perpendicular_facet_times)):
-            place = self.daq.perpendicular_facet_times[i]
-            laser_signal[place:place+laser_duration] = 10
-        self.daq.set_default_voltage(laser_signal, 0)
-        self.daq.set_default_voltage(laser_signal, 1)
-        """
-        
+##        want continuous laser firing? try these lines.
+##        """
+####        laser_signal = np.zeros((points_per_rotation), dtype=np.float64)
+######        camera_signal = np.zeros((points_per_rotation), dtype=np.float64)
+####        laser_duration = 5
+####        delay = 0
+######        for i in range(len(self.daq.perpendicular_facet_times)):
+######            print "flash"
+####        place = self.daq.perpendicular_facet_times[0] + delay ##i
+####        laser_signal[place:place+laser_duration] = 10##7.5
+######            camera_signal[place:place+50] = 3##7.5
+####        print "i =", i
+####        print laser_signal[self.daq.perpendicular_facet_times[1]]
+####        print "changing defaults"
+####        self.daq.set_default_voltage(laser_signal, n2c['488'])
+####        self.daq.set_default_voltage(laser_signal, n2c['blanking'])
+######        self.daq.set_default_voltage(camera_signal, n2c['camera'])
+####
         self.seconds_per_write = self.daq.write_length * 1.0 / self.daq.rate
         print "Seconds per write:", self.seconds_per_write
 

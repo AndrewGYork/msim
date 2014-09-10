@@ -1,6 +1,7 @@
 import time
 import serial
 
+
 class Stage:
     """Zaber stage, attached through the serial port."""
     def __init__(self, timeout=1):
@@ -18,7 +19,7 @@ class Stage:
             print "Consider trying again."
             raise
         print "Renumbering stages:"
-        self.devices = self.renumber_all_devices() 
+        self.devices = self.renumber_all_devices()
         for d in self.devices:
             print ' Axis:', d
         print "Done renumbering."
@@ -28,7 +29,7 @@ class Stage:
     def send(self, instruction):
         """
         send instruction
-        'instruction' must be a list of 6 bytes (no error checking)
+        'instruction' must be a list of 6 integers, 0-255 (no error checking)
         """
         for i in instruction:
             self.serial.write(chr(i))
@@ -50,6 +51,9 @@ class Stage:
             " Is the stage plugged in?")
 
     def move(self, distance, movetype='absolute', response=True, axis='all'):
+        """
+        Maybe allow simultaneous moves to different positions?
+        """
         """
         Sanity checking:
         """
@@ -87,17 +91,17 @@ class Stage:
         self.pending_moves = 0
         return response
 
-    def set_target_speed(self, speed, response=True):
-        inst = [0, 42]
-        inst.extend(four_byte_representation(speed))
-        self.send(inst)
-        if response:
-            return self.receive()
-
-    def get_target_speed(self):
-        inst = [0, 53, 42, 0, 0, 0]
-        self.send(inst)
-        return self.receive()
+#    def set_target_speed(self, speed, response=True):
+#        inst = [0, 42]
+#        inst.extend(four_byte_representation(speed))
+#        self.send(inst)
+#        if response:
+#            return self.receive()
+#
+#    def get_target_speed(self):
+#        inst = [0, 53, 42, 0, 0, 0]
+#        self.send(inst)
+#        return self.receive()
 
 #    def set_running_current(self, denom, response=True):
 #        if denom < 10:
@@ -163,8 +167,8 @@ def four_byte_representation(x):
     return byteList
 
 if __name__ == '__main__':
+    my_stage = Stage(timeout=20)
     try:
-        my_stage = Stage(timeout=20)
         print my_stage.move(0, movetype='absolute', axis='all')
         print my_stage.move(50000, movetype='absolute', axis='all')
         print my_stage.move(0, movetype='absolute', axis='all')

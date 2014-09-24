@@ -1,6 +1,7 @@
 import ctypes as C
 import os
 import time
+import multiprocessing as mp
 import numpy as np
 import simple_tif
 
@@ -47,7 +48,8 @@ class DMK_23GP031:
         self.set_video_format(self.video_formats[0], verbose=verbose)
 
         self.set_exposure(0.1)
-        self.enable_trigger(0) 
+        self.enable_trigger(0)
+        self.live = False
         return None
 
     def set_video_format(self, video_format, verbose=True):
@@ -73,7 +75,7 @@ class DMK_23GP031:
         least once, so that get_format and get_image_information can
         be called; the call to set_sink_format will take care of this.
         """
-        self.set_sink_format(verbose=verbose)
+        self._set_sink_format(verbose=verbose)
         """
         Finally, we should check that our changes to the video and
         sink format were successful, and update the corresponding
@@ -82,7 +84,7 @@ class DMK_23GP031:
         self.get_image_information(verbose=verbose)
         return None
 
-    def set_sink_format(self, verbose=True):
+    def _set_sink_format(self, verbose=True):
         """
         For now, just set the "sink format" to Y16
         """
@@ -190,17 +192,21 @@ class DMK_23GP031:
         if verbose: print "done"
         return None
 
-    def snap(self, filename=None, verbose=True):
+    def snap(self, filename=None, timeout_milliseconds=None, verbose=True):
         if verbose: print "Snapping:",
         if self.live:
             already_live = True
         else:
             self.start_live(verbose=verbose)
-            already_live = False            
-        assert dll.success == dll.snap_image(self.handle, -1)
+            already_live = False
+        if timeout_milliseconds is None:
+            timeout_milliseconds = -1 #Wait forever
+        timeout_milliseconds = int(timeout_milliseconds)
+        assert dll.success == dll.snap_image(self.handle, timeout_milliseconds)
         if not already_live:
             self.stop_live(verbose=verbose)
         ptr = dll.get_image_pointer(self.handle)
+        if verbose: print " Image stored at:", ptr
         image_buffer = buffer_from_memory(
             ptr,
             self.width * self.height * self.bit_depth // 8)
@@ -225,6 +231,10 @@ class DMK_23GP031:
         result = dll.IC_EnableTrigger(self.handle, int(enable))
 ##        if result != 1:
 ##            raise UserWarning("Enable trigger failed")
+
+    def close(self):
+        pass #TODO: cleanup operations?
+    
 
 
 """
@@ -372,18 +382,133 @@ buffer_from_memory = C.pythonapi.PyBuffer_FromMemory
 buffer_from_memory.restype = C.py_object
 
 """
+We'd like to be able to execute non-blocking snaps. One way to do that
+is put the camera in a subprocess:
+"""
+def DMK_23GP031_child_process(commands, verbose):
+    cam = DMK_23GP031(verbose=verbose)
+    while True:
+        cmd, args = commands.recv()
+        if cmd == 'quit':
+            break
+        elif cmd == 'ping':
+            commands.send('ping')
+        elif cmd == 'set_video_format':
+            cam.set_video_format(**args)
+        elif cmd == 'get_image_information':
+            cam.get_image_information(**args)
+        elif cmd == 'set_exposure':
+            cam.set_exposure(**args)
+        elif cmd == 'get_exposure':
+            cam.get_exposure(**args)
+        elif cmd == 'start_live':
+            cam.start_live(**args)
+        elif cmd == 'stop_live':
+            cam.stop_live(**args)
+        elif cmd == 'snap':
+            cam.snap(**args)
+        elif cmd == 'enable_trigger':
+            cam.enable_trigger(**args)
+    cam.close()
+
+class DMK_23GP031_in_subprocess:
+    def __init__(self, verbose=True):
+        self.commands, self.child_commands = mp.Pipe()
+        self.child = mp.Process(
+            target=DMK_23GP031_child_process,
+            args=(self.child_commands,
+                  verbose,),
+            name='Camera')
+        self.child.start()
+        self.ping()
+
+    def ping(self, verbose=True):
+        if verbose: print "Waiting for ping from camera..."
+        self.commands.send(('ping', {}))
+        assert self.commands.recv() == 'ping'
+        if verbose: print "Ping returned."
+
+    def set_video_format(self, video_format, verbose=True):
+        args = locals()
+        args.pop('self')
+        self.commands.send(('set_video_format', args))
+
+    def get_image_information(self, verbose=True):
+        args = locals()
+        args.pop('self')
+        self.commands.send(('get_image_information', args))
+
+    def set_exposure(self, exposure_seconds, verbose=True):
+        args = locals()
+        args.pop('self')
+        self.commands.send(('set_exposure', args))
+
+    def get_exposure(self, verbose=True):
+        args = locals()
+        args.pop('self')
+        self.commands.send(('get_exposure', args))
+
+    def start_live(self, verbose=True):
+        args = locals()
+        args.pop('self')
+        self.commands.send(('start_live', args))
+
+    def stop_live(self, verbose=True):
+        args = locals()
+        args.pop('self')
+        self.commands.send(('stop_live', args))        
+
+    def snap(self, filename=None, timeout_milliseconds=None, verbose=True):
+        args = locals()
+        args.pop('self')
+        self.commands.send(('snap', args))
+
+    def enable_trigger(self, enable):
+        args = locals()
+        args.pop('self')
+        self.commands.send(('enable_trigger', args))
+
+    def close(self):
+        self.commands.send(('quit', {}))
+        self.child.join()
+
+"""
 Test code
 """
 if __name__ == '__main__':
-    camera = DMK_23GP031()
+##    """
+##    Test the camera object
+##    """
+##    camera = DMK_23GP031()
+##    camera.set_video_format("Y16 (1280x1024)")
+##    camera.enable_trigger(False)
+##    camera.start_live()
+##    start = time.clock()
+##    num_frames = 10
+##    for i in range(num_frames):
+##        #camera.snap(verbose=False)
+##        camera.snap(('image_{}.tif'.format(i)),
+##                    timeout_milliseconds = 10000,
+##                    verbose=True)
+##    end = time.clock()
+##    camera.stop_live()
+##    print num_frames * 1.0 / (end - start), "frames per second"
+
+    """
+    Test the camera-in-subprocess object
+    """
+    camera = DMK_23GP031_in_subprocess()
     camera.set_video_format("Y16 (1280x1024)")
-##    camera.enable_trigger(True)
+    
+    camera.set_exposure(0.04)
+    camera.get_exposure()
     camera.start_live()
-    start = time.clock()
-    num_frames = 10
-    for i in range(num_frames):
-        camera.snap(verbose=False)
-##        camera.snap(('image_{}.tif'.format(i)), verbose=False)
-    end = time.clock()
     camera.stop_live()
-    print num_frames * 1.0 / (end - start), "frames per second"
+    camera.enable_trigger(False)
+    
+    for i in range(2):
+        camera.snap(filename='test.tif')
+    camera.get_image_information(verbose=True)
+    camera.close()
+    print "If nothing printed above, you probably ran this in IDLE."
+    raw_input("Hit enter to continue...")

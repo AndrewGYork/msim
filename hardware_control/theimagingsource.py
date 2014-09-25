@@ -48,8 +48,9 @@ class DMK_23GP031:
         self.set_video_format(self.video_formats[0], verbose=verbose)
 
         self.set_exposure(0.1)
-        self.enable_trigger(0)
+        self.enable_trigger(False)
         self.live = False
+        self.frame_ready = False
         return None
 
     def set_video_format(self, video_format, verbose=True):
@@ -205,6 +206,11 @@ class DMK_23GP031:
         assert dll.success == dll.snap_image(self.handle, timeout_milliseconds)
         if not already_live:
             self.stop_live(verbose=verbose)
+        if filename is not None:
+            self.save(filename, verbose)
+        return None
+
+    def save(self, filename, verbose=True):
         ptr = dll.get_image_pointer(self.handle)
         if verbose: print " Image stored at:", ptr
         image_buffer = buffer_from_memory(
@@ -216,26 +222,54 @@ class DMK_23GP031:
         if verbose:
             print image.shape, image.dtype,
             print image.min(), image.max(), image.mean()
-        if filename is not None:
-            assert filename.endswith('.tif')
-            simple_tif.array_to_tif(image, filename)
-        return None
+        assert filename.endswith('.tif')
+        simple_tif.array_to_tif(image, filename)
 
     def enable_trigger(self, enable):
         """
-        Enable or disable camera triggering.
-
-        enable: True to enable the trigger, False to disable.
+        True to enable external triggering, False to disable.
         """
         assert dll.is_trigger_available(self.handle) == 1
-        result = dll.IC_EnableTrigger(self.handle, int(enable))
-##        if result != 1:
-##            raise UserWarning("Enable trigger failed")
+        assert dll.success != dll.IC_EnableTrigger(self.handle, int(enable))
+        """
+        EnableTrigger does NOT return dll.success when it succeeds,
+        even though the documentation says it should.
+        """
+
+    def send_trigger(self):
+        """
+        Send a software trigger to fire the device when in triggered mode.
+        """
+        assert dll.success == dll.software_trigger(self.handle)
+
+    def set_continuous_mode(self, enable, file_basename=None, verbose=True):
+        """
+        True to enable continuous mode, False to disable
+        """
+        assert not self.live
+        """
+        For some reason, set_continuous_mode doesn't return what the
+        documentation says it should.
+        """
+        assert dll.success != dll.set_continuous_mode(self.handle,
+                                                      int(not enable))
+        if enable:
+            def callback_function(handle, pdata, frame_num, data):
+                self.frame_ready = True
+                if file_basename is not None:
+                    self.save(file_basename + '_{:06}.tif'.format(frame_num),
+                              verbose=verbose)
+                return None
+
+            self._py_callback_function = callback_function
+            self._c_callback_function = FRAME_READY_CALLBACK(
+                self._py_callback_function)
+            dll.set_frame_ready_callback(
+                self.handle, self._c_callback_function, None)
+        return None
 
     def close(self):
         pass #TODO: cleanup operations?
-    
-
 
 """
 Structure definitions
@@ -370,6 +404,9 @@ dll.get_image_pointer = dll.IC_GetImagePtr
 dll.get_image_pointer.argtypes = [GrabberHandle]
 dll.get_image_pointer.restype = C.c_void_p
 
+buffer_from_memory = C.pythonapi.PyBuffer_FromMemory
+buffer_from_memory.restype = C.py_object
+
 dll.is_trigger_available = dll.IC_IsTriggerAvailable
 dll.is_trigger_available.argtypes = [GrabberHandle]
 dll.is_trigger_available.restype = C.c_int
@@ -378,8 +415,25 @@ dll.enable_trigger = dll.IC_EnableTrigger
 dll.enable_trigger.argtypes = [GrabberHandle, C.c_int]
 dll.enable_trigger.restype = C.c_int
 
-buffer_from_memory = C.pythonapi.PyBuffer_FromMemory
-buffer_from_memory.restype = C.py_object
+dll.software_trigger = dll.IC_SoftwareTrigger
+dll.software_trigger.argtypes = [GrabberHandle,]
+dll.software_trigger.restype = C.c_int
+
+FRAME_READY_CALLBACK = C.CFUNCTYPE(None,
+                                   GrabberHandle,
+                                   C.POINTER(C.c_ubyte),
+                                   C.c_ulong,
+                                   C.c_void_p)
+dll.set_frame_ready_callback = dll.IC_SetFrameReadyCallback
+dll.set_frame_ready_callback.argtypes = [GrabberHandle,
+                                         FRAME_READY_CALLBACK,
+                                         C.c_void_p]
+dll.set_frame_ready_callback.restype = C.c_int
+
+dll.set_continuous_mode = dll.IC_SetContinuousMode
+dll.set_continuous_mode.argtypes = [GrabberHandle,
+                                    C.c_int]
+dll.set_continuous_mode.restype = C.c_int
 
 """
 We'd like to be able to execute non-blocking snaps. One way to do that
@@ -476,39 +530,71 @@ class DMK_23GP031_in_subprocess:
 Test code
 """
 if __name__ == '__main__':
-##    """
-##    Test the camera object
-##    """
-##    camera = DMK_23GP031()
-##    camera.set_video_format("Y16 (1280x1024)")
-##    camera.enable_trigger(False)
-##    camera.start_live()
-##    start = time.clock()
-##    num_frames = 10
-##    for i in range(num_frames):
-##        #camera.snap(verbose=False)
-##        camera.snap(('image_{}.tif'.format(i)),
-##                    timeout_milliseconds = 10000,
-##                    verbose=True)
-##    end = time.clock()
-##    camera.stop_live()
-##    print num_frames * 1.0 / (end - start), "frames per second"
+    """
+    Test the camera object
+    """
+    print
+    print "**Testing snaps**"
+    print
+    camera = DMK_23GP031()
+    camera.set_video_format("Y16 (1280x1024)")    
+    camera.enable_trigger(False)
+    camera.set_exposure(0.05)
+    camera.start_live()
+    start = time.clock()
+    num_frames = 20
+    for i in range(num_frames):
+        camera.snap(('image_snap_{:06}.tif'.format(i)),
+                    timeout_milliseconds = 10000,
+                    verbose=False)
+    end = time.clock()
+    camera.stop_live()
+    camera.close()
+    print num_frames * 1.0 / (end - start), "frames per second"
 
+    """
+    Test callbacks with the camera object
+    """
+    print
+    print "**Testing callbacks**"
+    print
+    camera = DMK_23GP031()
+    camera.set_video_format("Y16 (1280x1024)")    
+    camera.enable_trigger(False)
+    camera.set_exposure(0.01)
+    camera.set_continuous_mode(True,
+                               file_basename='image_callback',
+                               verbose=False)
+    camera.start_live()
+    time.sleep(0.5)
+    num_frames = 20
+    start = time.clock()
+    for i in range(num_frames):
+        camera.frame_ready = False
+##        camera.send_trigger()
+        while not camera.frame_ready:
+            time.sleep(0.001)
+    end = time.clock()
+    time.sleep(0.5)
+    camera.stop_live()
+    camera.close()
+    print num_frames * 1.0 / (end - start), "frames per second"
+    
     """
     Test the camera-in-subprocess object
     """
-    camera = DMK_23GP031_in_subprocess()
-    camera.set_video_format("Y16 (1280x1024)")
-    
-    camera.set_exposure(0.04)
-    camera.get_exposure()
-    camera.start_live()
-    camera.stop_live()
-    camera.enable_trigger(False)
-    
-    for i in range(2):
-        camera.snap(filename='test.tif')
-    camera.get_image_information(verbose=True)
-    camera.close()
-    print "If nothing printed above, you probably ran this in IDLE."
-    raw_input("Hit enter to continue...")
+##    camera = DMK_23GP031_in_subprocess()
+##    camera.set_video_format("Y16 (1280x1024)")
+##    
+##    camera.set_exposure(0.04)
+##    camera.get_exposure()
+##    camera.start_live()
+##    camera.stop_live()
+##    camera.enable_trigger(False)
+##    
+##    for i in range(2):
+##        camera.snap(filename='test.tif')
+##    camera.get_image_information(verbose=True)
+##    camera.close()
+##    print "If nothing printed above, you probably ran this in IDLE."
+##    raw_input("Hit enter to continue...")

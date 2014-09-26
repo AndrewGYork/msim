@@ -63,6 +63,7 @@ class Display:
         self.brightness_scale_type = 'image_min_max_fraction'
         self.brightness_scale_min = 0.0
         self.brightness_scale_max = 1.0
+        self.flip = False
         self.set_downsampling()
         self.make_window()
         self.set_status()
@@ -223,8 +224,10 @@ class Display:
         self.window = pyglet.window.Window(
             self.image.width, self.image.height,
             caption='SIM display', resizable=True)
-        icon16 = pyglet.image.load('D:/amsim_code/microscope-icon16.png')
-        icon32 = pyglet.image.load('D:/amsim_code/microscope-icon32.png')
+        icon16 = pyglet.image.load(
+            'D:/instant_sim/code/microscope-icon16.png')
+        icon32 = pyglet.image.load(
+            'D:/instant_sim/code/microscope-icon32.png')
         self.window.set_icon(icon16, icon32)
         self.fps_display = pyglet.clock.ClockDisplay()
         self.image_x, self.image_y, self.image_scale = 0, 0, 1.0
@@ -537,6 +540,8 @@ class Display:
             self.image_f32 *= 255. / self.brightness_scale_max
             self.image_f32[self.image_f32 > 255] = 255.
             self.image_i8 = self.image_f32.astype(numpy.uint8)
+        if self.flip:
+            self.image_i8[:, :] = self.image_i8[:, ::-1]
         return None
 
     def _setup_asynchronous_subprocess_communication(self):
@@ -643,6 +648,11 @@ class Display:
             sys.stdout.flush()
         elif cmd[0] == 'set_shutter_mode':
             self.camera.set_shutter_mode(cmd[1], verbose=self.verbose)
+        elif cmd[0] == 'set_flip':
+            if cmd[1] == 'True':
+                self.flip = True
+            elif cmd[1] == 'False':
+                self.flip = False
         else:
             print 'command:', cmd, 'not recognized'
             sys.stdout.flush()
@@ -820,6 +830,15 @@ except:
         self.communicate('set_shutter_mode, ' + mode)
         return None
 
+    def set_flip(self, mode):
+        print "Setting flipmode to:", mode
+        if mode:
+            mode = 'True'
+        else:
+            mode = 'False'
+        self.communicate('set_flip, ' + mode)
+        return None
+
     def close(self):
         self.communicate('quit')
         return None
@@ -913,6 +932,8 @@ class Display_GUI:
             label="Camera ROI", command=self.open_roi_window)
         self.settingsmenu.add_command(
             label="Plot DAQ voltages", command=self.plot_daq_voltages)
+        self.settingsmenu.add_command(
+            label="Piezo z-stage", command=self.open_piezo_window)
         self.menubar.add_cascade(label="Settings", menu=self.settingsmenu)
         self.root.config(menu=self.menubar)
         
@@ -930,6 +951,8 @@ class Display_GUI:
         for c in self.lasers:
             self.emission_filters[c] = Tk.StringVar()
             self.emission_filters[c].set('Filter 0')
+        self.big_first_jump_wait_time_multiplier = Tk.IntVar()
+        self.big_first_jump_wait_time_multiplier.set(15)
 
         self.aotf_power = {}
         self.aotf_on = {}
@@ -957,7 +980,7 @@ class Display_GUI:
         
         self.galvo_sweep_milliseconds = 20.0
         self.galvo_amplitude = 1.
-        self.galvo_offset = -0.2
+        self.galvo_offset = 0
         self.galvo_delay = 0
         self.galvo_parked_position = 0 #Assume galvo starts undeflected
         self.set_galvo_parked_position(2.5)
@@ -1042,7 +1065,7 @@ class Display_GUI:
         a = Tk.Label(master=subframe, text='Delay:\n(seconds)')
         a.pack(side=Tk.LEFT)
         self.time_lapse_delay = Scale_Spinbox(
-            subframe, from_=0., to=100., increment=0.05, initial_value=1.)
+            subframe, from_=0., to=1200., increment=0.05, initial_value=1.)
         self.time_lapse_delay.spinbox.config(width=6)
         self.time_lapse_delay.pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
         subframe = Tk.Frame(frame)
@@ -1173,6 +1196,15 @@ class Display_GUI:
             self.galvo_window = Galvo_Window(self)
         self.galvo_window.root.lift()
         self.galvo_window.root.focus_force()
+        return None
+
+    def open_piezo_window(self):
+        try:
+            self.piezo_window.root.config()
+        except (AttributeError, Tk.TclError):
+            self.piezo_window = Piezo_Window(self)
+        self.piezo_window.root.lift()
+        self.piezo_window.root.focus_force()
         return None
 
     def update_stage_position(self):
@@ -1398,6 +1430,8 @@ class Display_GUI:
                                  self.stack_step.get())
             if stop < start:
                 step = -step #'self.stack_step' is always positive
+            elif start == stop:
+                stop = start + step
             z_positions_microns = list(numpy.arange(start, stop, step))
         trigger = self.trigger.get()
         if trigger != 'external':
@@ -1623,7 +1657,9 @@ class Display_GUI:
                 z_motion_time = 10e-3
             if (self.z_piezo_position_microns - z_positions_microns[0]) > 2:
                 #We're taking a big jump, we'll need extra time
-                first_z_motion_time = 15 * z_motion_time
+                first_z_motion_time = (
+                    self.big_first_jump_wait_time_multiplier.get() *
+                    z_motion_time)
                 big_first_jump = True
             else:
                 big_first_jump = False
@@ -1967,18 +2003,27 @@ class Display_GUI:
             self.config.write(configfile)
         return None
 
-    def open_tif_in_imagej(self, filename, delay=0.0):
+    def open_tif_in_imagej(
+        self, filename, delay=0.2, force_existence=True, tries_left=50):
         try:
             imagej_path = self.config.get('ImageJ', 'path')
         except:
             raise UserWarning("ImageJ path is not configured." +
                               "Delete or modify config.ini to fix this.")
-        print repr(filename)
-        cmd = """run("TIFF Virtual Stack...", "open=%s");"""%(
-            str(filename).replace('\\', '\\\\'))
-        print "Command to ImageJ:\n", repr(cmd)
-        time.sleep(delay)
-        subprocess.Popen([imagej_path, "-eval", cmd])
+        if os.path.exists(filename):
+            print repr(filename)
+            cmd = """run("TIFF Virtual Stack...", "open=%s");"""%(
+                str(filename).replace('\\', '\\\\'))
+            print "Command to ImageJ:\n", repr(cmd)
+            time.sleep(delay)
+            subprocess.Popen([imagej_path, "-eval", cmd])
+        else:
+            print "Waiting for file existence..."
+            if force_existence and tries_left > 0:
+                self.root.after(500, lambda: self.open_tif_in_imagej(
+                    filename, delay, force_existence, tries_left=tries_left-1))
+            else:
+                raise UserWarning("Timeout exceeded; file may not exist.")
         return None
     
     def open_tif_sequence_in_imagej(
@@ -2098,7 +2143,7 @@ user_name = sanitize(user_name)
 now = datetime.datetime.now()
 date_string = '%04i_%02i_%02i_'%(now.year, now.month, now.day)
 
-new_folder = os.path.join("D:\\\\amsim_data", date_string + user_name)
+new_folder = os.path.join("D:\\\\instant_sim\\\\data", date_string + user_name)
 
 i = 1
 while os.path.exists(new_folder + '_%03i'%(i)):
@@ -2138,6 +2183,7 @@ class Brightfield_Window:
         self.parent.root.withdraw()
         self.parent.set_brightfield_mirrors('on')
         self.parent.display.set_images_to_display(1)
+        self.parent.display.set_flip(True)
         self.old_snap_mode = self.parent.snap_if_stage_moves.get()
         self.parent.snap_if_stage_moves.set(0)
         self.old_trigger = self.parent.trigger.get()
@@ -2201,6 +2247,7 @@ class Brightfield_Window:
         if self.old_im_per_acq != 1:
             self.parent.display.set_images_per_acquisition(
                 self.old_im_per_acq)
+        self.parent.display.set_flip(False)
         self.exposure.set(self.old_exposure)
         self.set_exposure()
         self.root.destroy()
@@ -2409,6 +2456,23 @@ class Filter_Window:
             a = Tk.OptionMenu(frame, self.parent.emission_filters[c],
                               *['Filter %i'%i for i in range(10)])
             a.pack(side=Tk.LEFT)
+        return None
+
+class Piezo_Window:
+    def __init__(self, parent):
+        self.parent = parent
+        self.root = Tk.Toplevel(parent.root)
+        self.root.wm_title("Piezo z-stage settings")
+        self.root.bind("<Escape>", lambda x: self.root.destroy())
+
+        frame = Tk.Frame(self.root, relief=Tk.SUNKEN, bd=4)
+        frame.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
+        a = Tk.Label(frame, text='"Big first jump" wait-time multiplier:')
+        a.pack(side=Tk.TOP)
+        self.big_first_jump_wait_time_multiplier = Tk.Scale(
+            master=frame, from_=1, to=300, orient=Tk.HORIZONTAL,
+            variable=self.parent.big_first_jump_wait_time_multiplier)
+        self.big_first_jump_wait_time_multiplier.pack(side=Tk.TOP, fill=Tk.BOTH)
         return None
 
 class ROI_Window:

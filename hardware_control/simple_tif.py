@@ -41,7 +41,7 @@ next_ifd_offset = header[134:138].view(numpy.uint32)
 def array_to_tif(a, outfile='out.tif', slices=None, channels=None,
                  projected_preview_outfile=None):
     """
-    'a' is assumed to be a 3D numpy array of 16-bit unsigned integers.
+    'a' is assumed to be a 3D numpy array.
     I usually use this for stacks of camera data.
     If the data is multi-color, then slices * channels must equal a.shape[0].
     """

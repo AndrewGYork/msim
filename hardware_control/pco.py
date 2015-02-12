@@ -696,6 +696,79 @@ class Edge:
             print "Parameter:", response.parameter
         return None
 
+    def _get_fan_speed(self, verbose=True):
+        #Almost certainly, don't use this. Very special-case.
+        class SC2_Get_Fan_Control_Status(ctypes.Structure):
+            _fields_ = [("wCode", ctypes.c_uint16),
+                        ("wSize", ctypes.c_uint16),
+                        ("bCks", ctypes.c_uint8)]
+        message = SC2_Get_Fan_Control_Status()
+        message.wCode = 0x0B10
+        message.wSize = 5
+
+        class SC2_Get_Fan_Control_Status_Response(ctypes.Structure):
+            _fields_ = [("wCode", ctypes.c_uint16),
+                        ("wSize", ctypes.c_uint16),
+                        ("wFanMode", ctypes.c_uint16),
+                        ("wFanMin", ctypes.c_uint16),
+                        ("wFanMax", ctypes.c_uint16),
+                        ("wStepSize", ctypes.c_uint16),
+                        ("wSetValue", ctypes.c_uint16),
+                        ("wActualValue", ctypes.c_uint16),
+                        ("wReserved", ctypes.c_uint16),
+                        ("bCks", ctypes.c_uint8)]
+        response = SC2_Get_Fan_Control_Status_Response()
+        response.wCode = 0x0B10
+        response.wSize = 19
+
+        if verbose:
+            print "Getting fan status..."
+        PCO_api.PCO_ControlCommandCall(self.camera_handle,
+                                       ctypes.byref(message), message.wSize,
+                                       ctypes.byref(response), response.wSize)
+        if verbose:
+            assert response.wFanMode in (0, 1)
+            print "Fan mode:", {0: 'Auto', 1: 'User-set'}[response.wFanMode]
+            print "Fan min/max/step:",
+            print response.wFanMin, response.wFanMax, response.wStepSize
+            print "Fan set value:", response.wSetValue
+            print "Fan actual value:", response.wActualValue
+        return None
+
+    def _set_fan_speed(self, auto=True, set_value=0, verbose=True):
+        #DON'T USE THIS. VERY special-case.
+        class SC2_Set_Fan_Control_Params(ctypes.Structure):
+            _fields_ = [("wCode", ctypes.c_uint16),
+                        ("wSize", ctypes.c_uint16),
+                        ("wFanMode", ctypes.c_uint16),
+                        ("wSetValue", ctypes.c_uint16),
+                        ("wReserved", ctypes.c_uint16),
+                        ("bCks", ctypes.c_uint8)]
+        message = SC2_Set_Fan_Control_Params()
+        message.wCode = 0x0C10
+        message.wSize = 11
+        if auto:
+            message.wFanMode = 0x0000
+        else:
+            message.wFanMode = 0x0001
+        set_value = int(set_value)
+        assert set_value >= 0
+        assert set_value <= 100
+        message.wSetValue = set_value
+
+        response = SC2_Set_Fan_Control_Params()
+        response.wCode = 0x0C10
+        response.wSize = 11
+
+        if verbose:
+            print "Setting fan status..."
+        PCO_api.PCO_ControlCommandCall(self.camera_handle,
+                                       ctypes.byref(message), message.wSize,
+                                       ctypes.byref(response), response.wSize)
+        if verbose:
+            self._get_fan_speed(verbose=True)
+        return None
+
     def close(self, verbose=True):
         print "Ending recording..."
         self.disarm(verbose=verbose)
@@ -786,7 +859,7 @@ libc.fclose(file_pointer)
 if __name__ == "__main__":
     import time, numpy
     times = []
-    camera = Edge(pco_edge_type='4.2')
+    camera = Edge(pco_edge_type='5.5')
     camera.apply_settings(
         region_of_interest=(641, 841, 1440, 1320),
         exposure_time_microseconds=500)

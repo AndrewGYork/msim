@@ -709,8 +709,7 @@ class Edge:
         class SC2_Get_Fan_Control_Status_Response(ctypes.Structure):
             _fields_ = [("wCode", ctypes.c_uint16),
                         ("wSize", ctypes.c_uint16),
-                        ("wFanMode", ctypes.c_uint16),
-                        ("wFanMin", ctypes.c_uint16),
+                        ("wFanMode", ctypes.c_uint16),                        ("wFanMin", ctypes.c_uint16),
                         ("wFanMax", ctypes.c_uint16),
                         ("wStepSize", ctypes.c_uint16),
                         ("wSetValue", ctypes.c_uint16),
@@ -736,7 +735,7 @@ class Edge:
         return None
 
     def _set_fan_speed(self, auto=True, set_value=0, verbose=True):
-        #DON'T USE THIS. VERY special-case.
+        """DON'T USE THIS. VERY special-case. The only reason I'm doing this is because I have an 'original design entry' version of this camera from five years ago."""
         class SC2_Set_Fan_Control_Params(ctypes.Structure):
             _fields_ = [("wCode", ctypes.c_uint16),
                         ("wSize", ctypes.c_uint16),

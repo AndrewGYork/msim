@@ -5,7 +5,6 @@ from simple_tiff import simple_tif_to_array
 
 measured_psf = simple_tif_to_array('psf.tif')
 print measured_psf.shape
-
 """"
 A superposition of a few small Gaussian PSFs that sum up to an
 approximation of our experimental PSF. They're characterized by
